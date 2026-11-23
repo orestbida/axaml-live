@@ -41,7 +41,7 @@ npx @vscode/vsce package
 ```
 
 Or run the **Package Extension** task in VS Code. Releases are built by `.github/workflows/release.yml` when a
-version tag (for example `v0.2.0`) is pushed; see the README.
+version tag (for example `v0.1.0`) is pushed; see the README.
 
 ## How to contribute
 

@@ -113,7 +113,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for development. To release:
    `configurationDefaults` as `<publisher>.axaml-live`). The release workflow checks that they match.
 2. Once, on https://marketplace.visualstudio.com/manage: open the publisher, **Trusted Publishing**, and add a policy for
    the GitHub repository `orestbida/axaml-live` and the workflow file `release.yml`. No token or secret is needed.
-3. Update `version` in `package.json` and `CHANGELOG.md`, commit, and push a tag like `v0.2.0`. GitHub Actions builds
+3. Update `version` in `package.json` and `CHANGELOG.md`, commit, and push a tag like `v0.1.0`. GitHub Actions builds
    the VSIX and attaches it to a GitHub release.
 4. To publish to the Marketplace, run the **Release** workflow from the Actions tab with **publish** checked.
 

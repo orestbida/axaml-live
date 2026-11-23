@@ -2,7 +2,10 @@
 
 All notable changes to AXAML Live are documented in this file.
 
-## [0.2.0] - 23 November 2026
+## [0.1.0] - 24 November 2026
+
+First release of AXAML Live, based on the archived AvaloniaVSCode extension (last release 0.0.27). Issue numbers
+refer to [AvaloniaUI/AvaloniaVSCode](https://github.com/AvaloniaUI/AvaloniaVSCode/issues).
 
 Previewer:
 
@@ -37,23 +40,18 @@ Language features:
 
 The language server now targets .NET 10 (Roslyn 5).
 
-## [0.1.0] - 23 November 2026
-
-Community fork of the archived MIT extension. The previewer was rewritten for reliability; issue numbers refer to
-[AvaloniaUI/AvaloniaVSCode](https://github.com/AvaloniaUI/AvaloniaVSCode/issues).
-
 New:
 
 - **New Avalonia Item...** in the Explorer folder context menu: Window, UserControl, TemplatedControl, Styles, ResourceDictionary, with the right namespace; F# files are added to the `.fsproj` compile list (#38, #116, #128, #118).
 - Preview toolbar: Restart, Build, Log, zoom (-/+, Ctrl+Wheel) (#96, #12, #78).
 - `.axaml.cs` / `.axaml.fs` files are nested under their `.axaml` in the Explorer (when file nesting is enabled).
-- Choose the project that hosts the previewer: **Avalonia: Select previewer host project** (or click the project name in the
+- Choose the project that hosts the previewer: **AXAML Live: Select previewer host project** (or click the project name in the
   preview toolbar), remembered per workspace, or the `axamlLive.previewer.hostProject` setting (AvaloniaPro #207, #200, #171).
 - XAML in a library that no executable references (plugins) can be previewed: the library is built too and added to the
   previewer copy without locking its output (AvaloniaPro #207).
 - Settings: `axamlLive.previewer.updateDelay`, `axamlLive.previewer.buildIfNeeded`, `axamlLive.previewer.defaultZoom`.
 
-Previewer:
+Previewer reliability:
 
 - Building while the previewer is open no longer fails with "file is locked" (#115, #165). The previewer runs from a shadow copy of the build output.
 - The preview reloads automatically after **any** build: the Build button, `dotnet build` in a terminal, C# Dev Kit (#152, #179).
