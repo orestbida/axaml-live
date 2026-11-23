@@ -1,0 +1,8 @@
+out/
+node_modules/
+avaloniaServer/
+solutionParserTool/
+.vscode-test/
+*.vsix
+dist/
+package-lock.json

@@ -1,0 +1,418 @@
+{
+  "name": "axaml-live",
+  "displayName": "AXAML Live",
+  "description": "Live preview, completion, diagnostics and formatting for Avalonia XAML (.axaml) files. Community project, not affiliated with AvaloniaUI.",
+  "publisher": "your-publisher-id",
+  "version": "0.2.0",
+  "license": "MIT",
+  "qna": "false",
+  "icon": "./media/icon.png",
+  "engines": {
+    "vscode": "^1.79.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Formatters",
+    "Linters",
+    "Snippets"
+  ],
+  "keywords": [
+    "axaml",
+    "xaml",
+    "avalonia",
+    "previewer",
+    "designer"
+  ],
+  "galleryBanner": {
+    "color": "#161C2D",
+    "theme": "dark"
+  },
+  "bugs": {
+    "url": "https://github.com/orestbida/AvaloniaVSCode/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/orestbida/AvaloniaVSCode"
+  },
+  "homepage": "https://github.com/orestbida/AvaloniaVSCode#readme",
+  "activationEvents": [
+    "workspaceContains:**/*.axaml",
+    "onLanguage:axaml"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "viewsWelcome": [
+      {
+        "view": "explorer",
+        "contents": "[Open a folder](command:vscode.openFolder) containing an Avalonia project, or create a new one.\n[Create Avalonia Project](command:axamlLive.newProject)"
+      }
+    ],
+    "languages": [
+      {
+        "id": "AXAML",
+        "aliases": [
+          "Avalonia XAML",
+          "axaml",
+          "AXAML"
+        ],
+        "extensions": [
+          ".axaml",
+          ".axml"
+        ],
+        "configuration": "./AXAML.language-configuration.json",
+        "icon": {
+          "dark": "./media/xaml-dark.svg",
+          "light": "./media/xaml-light.svg"
+        }
+      }
+    ],
+    "grammars": [
+      {
+        "language": "AXAML",
+        "scopeName": "source.AXAML",
+        "path": "./AXAML.tmLanguage.json"
+      }
+    ],
+    "commands": [
+      {
+        "command": "axamlLive.createPreviewerAssets",
+        "title": "Build project and reload preview",
+        "category": "AXAML Live"
+      },
+      {
+        "command": "axamlLive.showPreviewToSide",
+        "title": "Show preview",
+        "category": "AXAML Live",
+        "icon": "$(open-preview)"
+      },
+      {
+        "command": "axamlLive.restartPreviewer",
+        "title": "Restart previewer",
+        "category": "AXAML Live",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "axamlLive.selectSolution",
+        "title": "Select solution",
+        "category": "AXAML Live"
+      },
+      {
+        "command": "axamlLive.newProject",
+        "title": "Create a new Avalonia Project",
+        "category": "AXAML Live"
+      },
+      {
+        "command": "axamlLive.newItem",
+        "title": "New Avalonia Item...",
+        "category": "AXAML Live"
+      },
+      {
+        "command": "axamlLive.selectPreviewerHost",
+        "title": "Select previewer host project",
+        "category": "AXAML Live"
+      },
+      {
+        "command": "axamlLive.showCodeBehind",
+        "title": "Show Code-behind",
+        "category": "AXAML Live",
+        "icon": "$(file-code)"
+      },
+      {
+        "command": "axamlLive.showViewModel",
+        "title": "Show ViewModel",
+        "category": "AXAML Live",
+        "icon": "$(symbol-class)"
+      },
+      {
+        "command": "axamlLive.runProject",
+        "title": "Run / Debug Project",
+        "category": "AXAML Live",
+        "icon": "$(debug-alt)"
+      },
+      {
+        "command": "axamlLive.installTemplates",
+        "title": "Install / Update Avalonia Project Templates",
+        "category": "AXAML Live"
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "when": "editorLangId == AXAML",
+          "command": "axamlLive.showPreviewToSide",
+          "group": "navigation"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "axamlLive.showPreviewToSide",
+          "when": "resourceLangId == AXAML"
+        },
+        {
+          "command": "axamlLive.showCodeBehind",
+          "when": "editorLangId == AXAML"
+        },
+        {
+          "command": "axamlLive.showViewModel",
+          "when": "editorLangId == AXAML"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "axamlLive.newItem",
+          "when": "explorerResourceIsFolder",
+          "group": "navigation@9"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "axamlLive.showCodeBehind",
+          "when": "editorLangId == AXAML",
+          "group": "navigation@1"
+        },
+        {
+          "command": "axamlLive.showViewModel",
+          "when": "editorLangId == AXAML",
+          "group": "navigation@2"
+        }
+      ]
+    },
+    "configuration": [
+      {
+        "title": "AXAML Live",
+        "type": "object",
+        "properties": {
+          "axamlLive.trace.server": {
+            "type": "string",
+            "enum": [
+              "off",
+              "messages",
+              "verbose"
+            ],
+            "default": "messages",
+            "description": "Traces the communication between VS Code and the language server."
+          },
+          "axamlLive.previewer.updateDelay": {
+            "type": "number",
+            "default": 300,
+            "minimum": 0,
+            "description": "Delay in milliseconds before unsaved AXAML edits are sent to the previewer."
+          },
+          "axamlLive.previewer.buildIfNeeded": {
+            "type": "boolean",
+            "default": true,
+            "description": "Automatically build the project when the previewer needs build output that does not exist yet."
+          },
+          "axamlLive.previewer.defaultZoom": {
+            "type": [
+              "number",
+              "string"
+            ],
+            "default": 1,
+            "markdownDescription": "Initial zoom of the previewer: a factor (`1` = 100%) or `\"fitAll\"` / `\"fitWidth\"`. The zoom chosen in the preview toolbar is remembered per preview."
+          },
+          "axamlLive.previewer.hostProject": {
+            "type": "string",
+            "default": "",
+            "scope": "resource",
+            "description": "Executable project (name or path) that hosts the previewer, e.g. a test host for plugin libraries. Empty: the executable that references the file (Desktop head preferred). The \"Select previewer host project\" command overrides this per workspace."
+          },
+          "axamlLive.previewer.defaultThemeVariant": {
+            "type": "string",
+            "enum": [
+              "Default",
+              "Light",
+              "Dark"
+            ],
+            "default": "Default",
+            "description": "Theme variant the previewer starts with. Default uses the application theme."
+          },
+          "axamlLive.previewer.defaultFormFactor": {
+            "type": "string",
+            "enum": [
+              "default",
+              "desktop",
+              "laptop",
+              "phone",
+              "phoneSmall",
+              "phoneLarge",
+              "tablet",
+              "tabletLarge"
+            ],
+            "default": "default",
+            "description": "Form factor (device size) the previewer starts with. default uses the design size of the XAML (d:DesignWidth/Height)."
+          },
+          "axamlLive.previewer.defaultFormFactorRotated": {
+            "type": "boolean",
+            "default": false,
+            "description": "Start with the form factor rotated."
+          },
+          "axamlLive.previewer.enableInput": {
+            "type": "boolean",
+            "default": true,
+            "description": "Forward mouse and keyboard input to the previewed UI (toggle with the mouse button)."
+          },
+          "axamlLive.previewer.designDataContext": {
+            "type": "boolean",
+            "default": true,
+            "description": "When a view declares x:DataType but no Design.DataContext, preview it with a new instance of that type (if it can be constructed), so bindings show data instead of an empty view."
+          },
+          "axamlLive.previewer.background": {
+            "type": "string",
+            "default": "theme",
+            "examples": [
+              "theme",
+              "light",
+              "dark",
+              "#1a1a1a",
+              "Black"
+            ],
+            "markdownDescription": "Background behind views that do not set their own. `theme` uses the background of the app theme. `light`, `dark` or a color such as `#1a1a1a` is useful for transparent controls that are shown on a colored page in the app. Only the preview changes, not the file."
+          },
+          "axamlLive.build.useInstalledSdk": {
+            "type": "boolean",
+            "default": false,
+            "scope": "resource",
+            "markdownDescription": "When `global.json` asks for a .NET SDK that is not installed, build with the newest installed SDK instead of failing."
+          },
+          "axamlLive.previewer.fpsLimit": {
+            "type": "number",
+            "default": 60,
+            "minimum": 0,
+            "description": "Maximum frames per second of the previewer (animations). 0 = unlimited. Lower values reduce CPU usage."
+          },
+          "axamlLive.previewer.maxRenderScale": {
+            "type": "number",
+            "default": 3,
+            "minimum": 1,
+            "maximum": 8,
+            "description": "Maximum render scale when zoomed in. The preview is rendered at zoom x screen scale up to this value, so zooming stays sharp; lower values keep high zoom levels fast."
+          },
+          "axamlLive.previewer.autoOpen": {
+            "type": "boolean",
+            "default": false,
+            "description": "Open the previewer automatically when an .axaml file is opened."
+          },
+          "axamlLive.previewer.syncWithLaunchConfig": {
+            "type": "boolean",
+            "default": false,
+            "description": "Use the project started by the launch configuration (.vscode/launch.json, coreclr program or dotnet projectPath) as the previewer host, unless a host project is selected explicitly."
+          },
+          "axamlLive.showStyleAdornments": {
+            "type": "boolean",
+            "default": true,
+            "description": "Show a style badge after elements matched by a Style declared in the same file. Hover the badge to see the selectors."
+          },
+          "axamlLive.editor.attributeQuoteStyle": {
+            "type": "string",
+            "enum": [
+              "double",
+              "single"
+            ],
+            "default": "double",
+            "description": "Quotes used for attribute values written by completions and the formatter."
+          },
+          "axamlLive.formatting.attributeWrapping": {
+            "type": "string",
+            "enum": [
+              "none",
+              "alignWithFirst",
+              "indent"
+            ],
+            "default": "alignWithFirst",
+            "enumDescriptions": [
+              "Keep attributes on one line",
+              "Continuation lines aligned with the first attribute",
+              "Each attribute on its own line, indented one level"
+            ],
+            "description": "How to wrap attributes when an element has more than axamlLive.formatting.attributeWrapThreshold attributes."
+          },
+          "axamlLive.formatting.attributeWrapThreshold": {
+            "type": "number",
+            "default": 0,
+            "minimum": 0,
+            "description": "Wrap attributes when an element has more than this many attributes. 0 disables wrapping."
+          },
+          "axamlLive.formatting.markupExtensionArgWrapThreshold": {
+            "type": "number",
+            "default": 0,
+            "minimum": 0,
+            "description": "Wrap markup extension arguments ({Binding ...}) onto separate lines when there are more than this many. 0 disables."
+          },
+          "axamlLive.formatting.collapseBlankLines": {
+            "type": "boolean",
+            "default": true,
+            "description": "Collapse multiple consecutive blank lines into one when formatting."
+          }
+        }
+      }
+    ],
+    "snippets": [
+      {
+        "language": "csharp",
+        "path": "./csharp.json"
+      }
+    ],
+    "configurationDefaults": {
+      "explorer.fileNesting.patterns": {
+        "*.axaml": "${capture}.axaml.cs, ${capture}.axaml.fs"
+      },
+      "[AXAML]": {
+        "editor.defaultFormatter": "your-publisher-id.axaml-live"
+      }
+    },
+    "keybindings": [
+      {
+        "command": "axamlLive.showCodeBehind",
+        "key": "f7",
+        "when": "editorLangId == AXAML"
+      },
+      {
+        "command": "axamlLive.showViewModel",
+        "key": "shift+f7",
+        "when": "editorLangId == AXAML"
+      }
+    ]
+  },
+  "scripts": {
+    "install:all": "npm install",
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./ && npm run bundle",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile && npm run lint",
+    "lint": "eslint src media --ext ts,js",
+    "test": "npm run test:unit",
+    "e2e": "node ./out/test/e2e/runE2E.js",
+    "test:unit": "mocha --ui tdd \"out/test/unit/**/*.test.js\"",
+    "format": "prettier --write \"src/**/*.ts\" \"media/**/*.{js,css}\" \"*.json\" \".eslintrc.json\" \".vscode/*.json\"",
+    "format:check": "prettier --check \"src/**/*.ts\" \"media/**/*.{js,css}\" \"*.json\" \".eslintrc.json\" \".vscode/*.json\"",
+    "bundle": "esbuild ./src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --target=node18 --alias:bson=./node_modules/bson/lib/bson.cjs --sourcemap"
+  },
+  "devDependencies": {
+    "@types/fs-extra": "^11.0.1",
+    "@types/mocha": "^10.0.10",
+    "@types/node": "16.x",
+    "@types/vscode": "^1.79.0",
+    "@types/vscode-webview": "^1.57.1",
+    "@typescript-eslint/eslint-plugin": "^5.53.0",
+    "@typescript-eslint/parser": "^5.53.0",
+    "@vscode/test-electron": "^2.2.3",
+    "esbuild": "0.28.2",
+    "eslint": "^8.34.0",
+    "mocha": "^12.0.3",
+    "prettier": "3.10.1",
+    "typescript": "^4.9.5"
+  },
+  "dependencies": {
+    "@vscode/codicons": "^0.0.33",
+    "bson": "^5.4.0",
+    "fs-extra": "^11.1.1",
+    "vscode-languageclient": "^8.1.0"
+  },
+  "extensionDependencies": [
+    "ms-dotnettools.vscode-dotnet-runtime"
+  ],
+  "extensionKind": [
+    "workspace"
+  ]
+}
