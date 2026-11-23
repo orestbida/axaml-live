@@ -12,6 +12,10 @@ New:
 - **New Avalonia Item…** in the Explorer folder context menu: Window, UserControl, TemplatedControl, Styles, ResourceDictionary, with the right namespace; F# files are added to the `.fsproj` compile list (#38, #116, #128, #118).
 - Preview toolbar: Restart, Build, Log, zoom (−/+, Ctrl+Wheel) (#96, #12, #78).
 - `.axaml.cs` / `.axaml.fs` files are nested under their `.axaml` in the Explorer (when file nesting is enabled).
+- Choose the project that hosts the previewer: **Avalonia: Select previewer host project** (or click the project name in the
+  preview toolbar), remembered per workspace, or the `avalonia.previewer.hostProject` setting (AvaloniaPro #207, #200, #171).
+- XAML in a library that no executable references (plugins) can be previewed: the library is built too and added to the
+  previewer copy without locking its output (AvaloniaPro #207).
 - Settings: `avalonia.previewer.updateDelay`, `avalonia.previewer.buildIfNeeded`, `avalonia.previewer.defaultZoom`.
 
 Previewer:
@@ -27,6 +31,12 @@ Previewer:
 - Projects with `PublishAot` / trimming no longer fail with "Dynamic code generation is not supported on this platform" (#151).
 - Remote development, Codespaces and WSL: the previewer port is forwarded to the local UI (#131, #122, #53).
 - Tested with Avalonia 12.2 (net10.0) and 11.3 (net9.0), C# and F# projects, an xplat solution and a path with spaces.
+- Checked against the AvaloniaPro previewer reports; these work in this extension (each verified with a project):
+  build output paths over 260 characters (#208), a `native\<name>.dll` next to the assembly as with `NativeLib=Shared` (#187),
+  `Design.PreviewWith` in a TemplatedControl theme (#51), a net9.0 app using 10.x `Microsoft.Extensions.Logging.Abstractions`
+  / `System.Diagnostics.DiagnosticSource` (#197, #122), a .NET Framework package with native binaries (#133),
+  half-typed values while editing (#65), rebuilds while previewing (#202, #218), dependency upgrades (#172; the copy is fresh
+  for each previewer start).
 
 Projects and solutions:
 

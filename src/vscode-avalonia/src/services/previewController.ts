@@ -7,7 +7,7 @@ import * as sm from "../models/solutionModel";
 import * as sln from "./solutionParser";
 import { PreviewSession, canStartPreviewer, isSameProject, XamlResult } from "./previewSession";
 import { WebPreviewerPanel } from "../panels/WebPreviwerPanel";
-import { isAvaloniaFile, logger, samePath } from "../util/Utilities";
+import { AppConstants, isAvaloniaFile, logger, samePath } from "../util/Utilities";
 
 /**
  * Owns the preview panel and the previewer session and keeps them in sync with the editor:
@@ -43,6 +43,11 @@ export class PreviewController implements vscode.Disposable {
 				if (this._file && samePath(e.document.uri.fsPath, this._file.fsPath) && e.contentChanges.length) {
 					clearTimeout(this._editTimer);
 					this._editTimer = setTimeout(() => this.pushXaml(), this.editDelay);
+				}
+			}),
+			vscode.workspace.onDidChangeConfiguration((e) => {
+				if (this._panel && e.affectsConfiguration("avalonia.previewer.hostProject")) {
+					this.restart();
 				}
 			}),
 			vscode.workspace.onDidSaveTextDocument((doc) => {
@@ -83,6 +88,9 @@ export class PreviewController implements vscode.Disposable {
 			case "build":
 				this.build();
 				break;
+			case "selectHost":
+				vscode.commands.executeCommand(AppConstants.selectHostCommand);
+				break;
 			case "showLog":
 				logger.show(true);
 				break;
@@ -104,6 +112,12 @@ export class PreviewController implements vscode.Disposable {
 
 		const target = await this.resolveTarget(uri);
 		if (!target) {
+			return;
+		}
+		if (!fs.existsSync(target.file.targetPath) && this.autoBuild && !this._building) {
+			// the file's own assembly (e.g. a plugin library the host doesn't reference) was never built
+			this.stopSession();
+			await this.build(target.project);
 			return;
 		}
 		const session = this._session;
@@ -287,10 +301,24 @@ export class PreviewController implements vscode.Disposable {
 		this._panel?.setState({ status: "building", message: `Building ${project.name}…` });
 		clearTimeout(this._restartTimer);
 
-		const result = await vscode.window.withProgress(
-			{ location: vscode.ProgressLocation.Window, title: `Avalonia: building ${project.name}` },
-			() => dotnetBuild(project.path)
-		);
+		// a library that the host does not reference (plugin, #207) is not built by building the host
+		const current = sln.getSolutionModel();
+		const fileInfo = this._file && current ? sln.getFileDetails(this._file.fsPath, current) : undefined;
+		const targets = [project.path];
+		if (current && fileInfo && !samePath(fileInfo.projectPath, project.path) && !sln.isProjectReferencedBy(current, project, fileInfo.projectPath)) {
+			targets.unshift(fileInfo.projectPath);
+		}
+
+		let result: BuildResult = { ok: true, errors: "", tail: "" };
+		for (const target of targets) {
+			result = await vscode.window.withProgress(
+				{ location: vscode.ProgressLocation.Window, title: `Avalonia: building ${path.basename(target)}` },
+				() => dotnetBuild(target)
+			);
+			if (!result.ok) {
+				break;
+			}
+		}
 		clearTimeout(this._restartTimer); // ignore watcher events caused by our own build
 
 		if (!result.ok) {

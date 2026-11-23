@@ -56,6 +56,8 @@ export class AppConstants {
 
 	static readonly solutionData = "avalonia.solutionData";
 	static readonly selectedSolution = "avalonia.selectedSolution";
+	static readonly previewerHost = "avalonia.previewerHost";
+	static readonly selectHostCommand = "avalonia.selectPreviewerHost";
 
 	static readonly extensionId = "AvaloniaCommunity.vscode-avalonia-community";
 }

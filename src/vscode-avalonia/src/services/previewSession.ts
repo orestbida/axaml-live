@@ -136,6 +136,22 @@ export class PreviewSession implements vscode.Disposable {
 	private mapAssembly(assemblyPath: string): string {
 		if (this._shadowDir) {
 			const candidate = path.join(this._shadowDir, path.basename(assemblyPath));
+			if (!fs.existsSync(candidate) && fs.existsSync(assemblyPath)) {
+				// library not referenced by the host (plugin, #207): add its output to the shadow copy,
+				// without overwriting the host's files, so it never locks its own bin folder
+				try {
+					const srcDir = path.dirname(assemblyPath);
+					for (const entry of fs.readdirSync(srcDir, { withFileTypes: true })) {
+						const dst = path.join(this._shadowDir, entry.name);
+						if (entry.isFile() && !fs.existsSync(dst)) {
+							fs.copyFileSync(path.join(srcDir, entry.name), dst);
+						}
+					}
+					logger.info(`Added ${path.basename(assemblyPath)} (not referenced by ${this.project.name}) to the previewer copy.`);
+				} catch (e) {
+					logger.warn(`Could not copy ${assemblyPath} for the previewer: ${e}`);
+				}
+			}
 			if (fs.existsSync(candidate)) {
 				return candidate;
 			}

@@ -103,6 +103,11 @@
         "command": "avalonia.newItem",
         "title": "New Avalonia Item…",
         "category": "Avalonia"
+      },
+      {
+        "command": "avalonia.selectPreviewerHost",
+        "title": "Select previewer host project",
+        "category": "Avalonia"
       }
     ],
     "menus": {
@@ -159,6 +164,12 @@
             "minimum": 0.25,
             "maximum": 4,
             "description": "Initial zoom factor of the previewer (1 = 100%). Use the -/+ buttons or Ctrl+Wheel in the preview to change it."
+          },
+          "avalonia.previewer.hostProject": {
+            "type": "string",
+            "default": "",
+            "scope": "resource",
+            "description": "Executable project (name or path) that hosts the previewer, e.g. a test host for plugin libraries. Empty: the executable that references the file (Desktop head preferred). The \"Select previewer host project\" command overrides this per workspace."
           }
         }
       }

@@ -119,7 +119,7 @@ export class WebPreviewerPanel implements vscode.Disposable {
 	.dot.starting, .dot.building { background: var(--vscode-editorWarning-foreground, #d29922); animation: pulse 1s infinite alternate; }
 	.dot.error { background: var(--vscode-editorError-foreground, #f85149); }
 	@keyframes pulse { from { opacity: 1; } to { opacity: .3; } }
-	.status { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; opacity: .85; }
+	.status { cursor: pointer; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; opacity: .85; }
 	button { background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); border: none; padding: 3px 10px; cursor: pointer; border-radius: 2px; font: inherit; }
 	button:hover { background: var(--vscode-button-secondaryHoverBackground); }
 	button:disabled { opacity: .5; cursor: default; }
@@ -162,6 +162,8 @@ export class WebPreviewerPanel implements vscode.Disposable {
 	$("build").onclick = () => send("build");
 	$("overlayBuild").onclick = () => send("build");
 	$("log").onclick = () => send("showLog");
+	$("status").onclick = () => send("selectHost");
+	$("status").title = "Click to choose the project that hosts the previewer";
 
 	// zoom: scales the previewer frame; mouse input still maps correctly through the transform
 	const levels = [0.25, 0.33, 0.5, 0.67, 0.75, 0.9, 1, 1.25, 1.5, 2, 3, 4];

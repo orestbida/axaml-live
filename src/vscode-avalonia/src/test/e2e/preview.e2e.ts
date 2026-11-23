@@ -86,6 +86,9 @@ suite("Avalonia previewer (e2e)", () => {
 		await vscode.commands.executeCommand("avalonia.showPreviewToSide", editor.document.uri);
 		const s = await waitFor("preview ready", (s) => s.sessionState === "ready" && s.panelState?.status === "ready", 240000);
 		assert.ok(s.htmlUrl?.startsWith("http://127.0.0.1:"));
+		// the unmodified file must render without errors
+		const r = await waitFor("first XAML result", (s) => !!s.lastXaml, 60000);
+		assert.ok(!r.lastXaml?.error && !r.lastXaml?.message, `initial preview error: ${r.lastXaml?.message ?? r.lastXaml?.error}`);
 		await checkpoint("preview-ready");
 	});
 
@@ -133,6 +136,23 @@ suite("Avalonia previewer (e2e)", () => {
 		assert.strictEqual(diags().length, 0);
 		await editor.document.save();
 		await checkpoint("error-fixed");
+	});
+
+	test("half-typed values report an error and keep the previewer alive (AvaloniaPro #65)", async () => {
+		await showMain();
+		const started = (await state()).sessionsStarted;
+		const text = editor.document.getText();
+		const at = text.indexOf("#7C4DFF");
+		assert.ok(at > 0, "live edit content missing");
+		const range = new vscode.Range(editor.document.positionAt(at), editor.document.positionAt(at + "#7C4DFF".length));
+		await editor.edit((e) => e.replace(range, "#7C"));
+		const s = await waitFor("error for incomplete value", (s) => !!(s.lastXaml?.error || s.lastXaml?.message), 30000);
+		console.log(`[e2e] incomplete value: ${(s.lastXaml?.message ?? s.lastXaml?.error ?? "").split("\n")[0].substring(0, 120)}`);
+		assert.strictEqual(s.sessionState, "ready", "previewer died on an incomplete value");
+		await editor.edit((e) => e.replace(new vscode.Range(range.start, range.start.translate(0, 3)), "#7C4DFF"));
+		const ok = await waitFor("recovered", noXamlError, 30000);
+		assert.strictEqual(ok.sessionsStarted, started, "previewer had to restart");
+		await editor.document.save();
 	});
 
 	test("external dotnet build works while previewing and reloads the preview", async () => {
@@ -262,6 +282,24 @@ suite("Avalonia previewer (e2e)", () => {
 				}
 			}
 			await showMain();
+		}
+	});
+
+	test("previewer host project setting is honored (#207, #200)", async () => {
+		const before = await state();
+		const config = vscode.workspace.getConfiguration("avalonia.previewer");
+		try {
+			await config.update("hostProject", "DoesNotExist", vscode.ConfigurationTarget.Workspace);
+			let s = await waitFor("restart with unknown host", (s) => s.sessionsStarted > before.sessionsStarted && s.sessionState === "ready", 120000);
+			assert.strictEqual(s.project, before.project, "unknown host must fall back to automatic selection");
+			const started = s.sessionsStarted;
+			await config.update("hostProject", before.project, vscode.ConfigurationTarget.Workspace);
+			s = await waitFor("restart with explicit host", (s) => s.sessionsStarted > started && s.sessionState === "ready", 120000);
+			assert.strictEqual(s.project, before.project);
+		} finally {
+			const started = (await state()).sessionsStarted;
+			await config.update("hostProject", undefined, vscode.ConfigurationTarget.Workspace);
+			await waitFor("restart after clearing host", (s) => s.sessionsStarted > started && s.sessionState === "ready", 120000);
 		}
 	});
 

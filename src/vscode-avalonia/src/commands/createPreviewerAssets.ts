@@ -20,6 +20,17 @@ export class CreatePreviewerAssets implements Command {
 	}
 }
 
+export class SelectPreviewerHostCommand implements Command {
+	public readonly id = AppConstants.selectHostCommand;
+	constructor(private readonly _controller: PreviewController) {}
+
+	async execute() {
+		if (await sln.selectPreviewerHost()) {
+			await this._controller.restart();
+		}
+	}
+}
+
 export class SelectSolutionCommand implements Command {
 	public readonly id = AppConstants.selectSolutionCommand;
 	constructor(private readonly _controller: PreviewController) {}

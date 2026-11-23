@@ -30,6 +30,11 @@ Settings:
 | `avalonia.previewer.updateDelay` | `300` | ms before unsaved edits are sent to the previewer |
 | `avalonia.previewer.buildIfNeeded` | `true` | build automatically when there is no build output |
 | `avalonia.previewer.defaultZoom` | `1` | initial zoom |
+| `avalonia.previewer.hostProject` | `""` | executable project that hosts the previewer (empty: automatic) |
+
+The previewer runs inside an executable project. By default it is the one that references the file (the Desktop head
+is preferred). For plugin libraries or a dedicated design-time host, run **Avalonia: Select previewer host project**
+or click the project name in the preview toolbar.
 
 Commands: **Avalonia: Show preview**, **Restart previewer**, **Build project and reload preview**, **Select solution**, **Create a new Avalonia Project**, **New Avalonia Item…**.
 

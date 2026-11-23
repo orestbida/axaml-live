@@ -163,6 +163,17 @@ function isExecutable(p: sln.Project) {
  */
 export function getExecutableProject(solution: sln.Solution, file?: sln.File): sln.Project | undefined {
 	const exes = solution.projects.filter(isExecutable);
+
+	// explicit choice (#207, #200, #171): e.g. a test/host project for plugin libraries that no executable references
+	const preferred = getPreferredHost();
+	if (preferred) {
+		const host = exes.find((p) => p.name === preferred || samePath(p.path, preferred));
+		if (host) {
+			return host;
+		}
+		logger.warn(`Previewer host project "${preferred}" not found among executable projects; using automatic selection.`);
+	}
+
 	const withDesigner = exes.filter((p) => p.designerHostPath);
 	const candidates = withDesigner.length ? withDesigner : exes;
 
@@ -177,6 +188,46 @@ export function getExecutableProject(solution: sln.Solution, file?: sln.File): s
 		}
 	}
 	return candidates.find((p) => /desktop/i.test(p.name)) ?? candidates[0];
+}
+
+/** Host chosen with "Select previewer host project" (workspace) or the `avalonia.previewer.hostProject` setting. */
+function getPreferredHost(): string | undefined {
+	const picked = _context?.workspaceState.get<string>(AppConstants.previewerHost);
+	if (picked) {
+		return picked;
+	}
+	const setting = vscode.workspace.getConfiguration("avalonia.previewer").get<string>("hostProject", "").trim();
+	return setting || undefined;
+}
+
+/** Lets the user pick the executable project that hosts the previewer; "Automatic" clears the choice. */
+export async function selectPreviewerHost(): Promise<boolean> {
+	const model = await ensureSolutionModel();
+	const exes = model?.projects.filter(isExecutable) ?? [];
+	if (!exes.length) {
+		vscode.window.showInformationMessage("No executable projects (OutputType WinExe/Exe) found.");
+		return false;
+	}
+	const current = getPreferredHost();
+	const items = [
+		{ label: "Automatic", description: "project that references the file, Desktop head preferred", value: "" },
+		...exes.map((p) => ({
+			label: p.name,
+			description: vscode.workspace.asRelativePath(p.path) + (p.designerHostPath ? "" : " (not built)"),
+			value: p.name,
+		})),
+	].map((i) => ({ ...i, picked: i.value === (current ?? "") }));
+	const picked = await vscode.window.showQuickPick(items, { placeHolder: `Previewer host project (current: ${current ?? "Automatic"})` });
+	if (!picked) {
+		return false;
+	}
+	await _context.workspaceState.update(AppConstants.previewerHost, picked.value || undefined);
+	return true;
+}
+
+/** True when `host` references the project at `projectPath`, directly or transitively. */
+export function isProjectReferencedBy(solution: sln.Solution, host: sln.Project, projectPath: string): boolean {
+	return referencesProject(solution, host, projectPath, new Set());
 }
 
 function referencesProject(solution: sln.Solution, from: sln.Project, target: string, seen: Set<string>): boolean {
