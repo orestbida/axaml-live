@@ -1,0 +1,75 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+    tags-ignore: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build and test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: src/AxamlLive/package-lock.json
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Install npm packages
+        working-directory: src/AxamlLive
+        run: npm ci
+
+      - name: Lint
+        working-directory: src/AxamlLive
+        run: npm run lint
+
+      - name: Check formatting
+        working-directory: src/AxamlLive
+        run: npm run format:check
+
+      - name: Compile
+        working-directory: src/AxamlLive
+        run: npm run compile
+
+      - name: Unit tests
+        working-directory: src/AxamlLive
+        run: npm run test:unit
+
+      - name: Build language server and solution parser (Release)
+        working-directory: src
+        run: |
+          dotnet build AvaloniaLSP/AvaloniaLanguageServer/AvaloniaLanguageServer.csproj -c Release --output AxamlLive/avaloniaServer
+          dotnet build SolutionParser/SolutionParser.csproj -c Release --output AxamlLive/solutionParserTool
+
+      - name: Package VSIX
+        if: matrix.os == 'ubuntu-latest'
+        working-directory: src/AxamlLive
+        run: npx --yes @vscode/vsce package -o ../../axaml-live.vsix
+
+      - name: Upload VSIX
+        if: matrix.os == 'ubuntu-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: axaml-live-vsix
+          path: axaml-live.vsix
+          if-no-files-found: error

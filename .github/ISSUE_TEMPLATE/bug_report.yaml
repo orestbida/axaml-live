@@ -19,25 +19,25 @@ body:
     - type: input
       id: plugin-version
       attributes:
-          label: Avalonia for VS Code
-          placeholder: e.g. v0.10.18
+          label: AXAML Live version
+          placeholder: e.g. 0.2.0
       validations:
           required: true
     - type: input
       id: avalonia-version
       attributes:
           label: Avalonia version
-          placeholder: e.g. 0.10.18, 11.0
+          placeholder: e.g. 11.3, 12.2
     - type: input
       id: vs-version
       attributes:
           label: VS Code version
-          placeholder: e.g. v0.0.25
+          placeholder: e.g. 1.106
     - type: textarea
       id: logs
       attributes:
           label: Relevant log output
-          description: Please attach any relevant log output. You can find the logs in the Output panel (View -> Output) under the Avalonia for VS Code channel.
+          description: Please attach any relevant log output. You can find the logs in the Output panel (View -> Output) under the "AXAML Live" channel (or click the Log button in the preview).
           render: shell
       validations:
           required: true

@@ -1,0 +1,98 @@
+name: Release
+
+# Push a tag like v0.2.0 to build the VSIX and attach it to a GitHub release.
+# Publishing to the VS Code Marketplace is a separate, manual step: run this workflow from the Actions tab with
+# "publish" checked. It needs a VSCE_PAT repository secret (a Marketplace personal access token) and the
+# "publisher" field in src/AxamlLive/package.json set to your Marketplace publisher ID.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish to the VS Code Marketplace
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: src/AxamlLive/package-lock.json
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Check the tag matches package.json
+        if: startsWith(github.ref, 'refs/tags/v')
+        working-directory: src/AxamlLive
+        run: |
+          version=$(node -p "require('./package.json').version")
+          if [ "v$version" != "${GITHUB_REF_NAME}" ]; then
+            echo "Tag ${GITHUB_REF_NAME} does not match package.json version $version"
+            exit 1
+          fi
+
+      - name: Check the extension ID is consistent
+        working-directory: src/AxamlLive
+        run: |
+          node -e '
+            const p = require("./package.json");
+            const id = p.publisher + "." + p.name;
+            const formatter = p.contributes.configurationDefaults["[AXAML]"]["editor.defaultFormatter"];
+            if (formatter !== id) { console.error("editor.defaultFormatter is " + formatter + ", expected " + id); process.exit(1); }'
+
+      - name: Build
+        run: bash build.sh
+
+      - name: Unit tests
+        working-directory: src/AxamlLive
+        run: npm run test:unit
+
+      - name: Package VSIX
+        working-directory: src/AxamlLive
+        run: npx --yes @vscode/vsce package -o ../../axaml-live-${GITHUB_REF_NAME#v}.vsix
+
+      - name: Upload VSIX
+        uses: actions/upload-artifact@v4
+        with:
+          name: axaml-live-vsix
+          path: axaml-live-*.vsix
+          if-no-files-found: error
+
+      - name: Create GitHub release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${GITHUB_REF_NAME}" axaml-live-*.vsix --title "${GITHUB_REF_NAME}" --notes "See CHANGELOG.md for the changes in this version."
+
+      - name: Publish to the VS Code Marketplace
+        if: github.event_name == 'workflow_dispatch' && inputs.publish
+        working-directory: src/AxamlLive
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: |
+          if [ -z "$VSCE_PAT" ]; then
+            echo "The VSCE_PAT secret is not set."
+            exit 1
+          fi
+          if [ "$(node -p "require('./package.json').publisher")" = "your-publisher-id" ]; then
+            echo "Set the publisher field in package.json to your Marketplace publisher ID first."
+            exit 1
+          fi
+          npx --yes @vscode/vsce publish --packagePath ../../axaml-live-*.vsix
