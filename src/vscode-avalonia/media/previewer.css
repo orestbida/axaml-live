@@ -3,36 +3,39 @@ body { display: flex; flex-direction: column; font-family: var(--vscode-font-fam
 
 /* toolbar modelled on VS Code editor toolbars: 22px controls on one center line */
 .toolbar { display: flex; align-items: center; gap: 4px 6px; min-height: 32px; padding: 5px 8px; box-sizing: border-box; border-bottom: 1px solid var(--vscode-panel-border, var(--vscode-widget-border, transparent)); background: var(--vscode-editor-background); flex: none; flex-wrap: wrap; }
-.group { display: flex; align-items: center; gap: 2px; height: 22px; }
+.group { display: flex; align-items: center; gap: 4px; height: 24px; }
+/* modern VS Code look: 6px corners, faint fill and a barely visible border derived from the theme foreground */
+.toolbar { --ctl-bg: color-mix(in srgb, var(--vscode-foreground) 5%, transparent); --ctl-bg-hover: color-mix(in srgb, var(--vscode-foreground) 10%, transparent); --ctl-border: color-mix(in srgb, var(--vscode-foreground) 12%, transparent); --ctl-border-hover: color-mix(in srgb, var(--vscode-foreground) 22%, transparent); }
 .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--vscode-disabledForeground); flex: none; }
 .dot.ready { background: var(--vscode-testing-iconPassed, #3fb950); }
 .dot.starting, .dot.building { background: var(--vscode-editorWarning-foreground, #d29922); animation: pulse 1s infinite alternate; }
 .dot.error { background: var(--vscode-editorError-foreground, #f85149); }
 @keyframes pulse { from { opacity: 1; } to { opacity: .3; } }
-.status { flex: 1; min-width: 60px; line-height: 22px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--vscode-descriptionForeground); cursor: pointer; }
+.status { flex: 1; min-width: 60px; line-height: 24px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--vscode-descriptionForeground); cursor: pointer; }
 .status:hover { color: var(--vscode-foreground); }
 
-/* icon buttons: like .action-item in VS Code toolbars */
-button.action { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; padding: 0; margin: 0; border: none; border-radius: 5px; background: transparent; color: var(--vscode-icon-foreground); cursor: pointer; font-size: 16px; }
-button.action:hover { background: var(--vscode-toolbar-hoverBackground); }
-button.action:active { background: var(--vscode-toolbar-activeBackground, var(--vscode-toolbar-hoverBackground)); }
-button.action:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
-button.action:disabled { opacity: .4; cursor: default; background: transparent; }
-/* toggles: like VS Code option toggles (e.g. "Match Case") */
-button.action.checked { background: var(--vscode-inputOption-activeBackground); color: var(--vscode-inputOption-activeForeground, var(--vscode-icon-foreground)); box-shadow: inset 0 0 0 1px var(--vscode-inputOption-activeBorder, transparent); }
+/* icon buttons */
+button.action { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; box-sizing: border-box; padding: 0; margin: 0; border: 1px solid var(--ctl-border); border-radius: 6px; background: var(--ctl-bg); color: var(--vscode-icon-foreground); cursor: pointer; font-size: 16px; transition: background-color .1s, border-color .1s; }
+button.action:hover { background: var(--ctl-bg-hover); border-color: var(--ctl-border-hover); }
+button.action:active { background: var(--vscode-toolbar-activeBackground, var(--ctl-bg-hover)); }
+button.action:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 1px; }
+button.action:disabled { opacity: .4; cursor: default; background: var(--ctl-bg); border-color: var(--ctl-border); }
+/* toggles: VS Code option toggle colors (e.g. "Match Case") */
+button.action.checked { background: var(--vscode-inputOption-activeBackground); color: var(--vscode-inputOption-activeForeground, var(--vscode-icon-foreground)); border-color: var(--vscode-inputOption-activeBorder, var(--ctl-border-hover)); }
 
-/* dropdowns: VS Code select box (dropdown colors, 2px radius, codicon chevron) */
-.select { position: relative; display: inline-flex; height: 22px; }
-.select::after { content: "\eab4"; font: normal normal normal 16px/1 codicon; position: absolute; right: 3px; top: 3px; pointer-events: none; color: var(--vscode-dropdown-foreground); }
-select { appearance: none; -webkit-appearance: none; height: 22px; box-sizing: border-box; margin: 0; padding: 0 22px 0 6px; font: inherit; font-size: 12px; line-height: 20px; cursor: pointer;
-	background: var(--vscode-dropdown-background); color: var(--vscode-dropdown-foreground); border: 1px solid var(--vscode-dropdown-border, transparent); border-radius: 2px; color-scheme: light dark; }
-select:focus { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
+/* dropdowns with a codicon chevron */
+.select { position: relative; display: inline-flex; height: 24px; }
+.select::after { content: "\eab4"; font: normal normal normal 16px/1 codicon; position: absolute; right: 5px; top: 4px; pointer-events: none; color: var(--vscode-dropdown-foreground, var(--vscode-foreground)); opacity: .8; }
+select { appearance: none; -webkit-appearance: none; height: 24px; box-sizing: border-box; margin: 0; padding: 0 24px 0 8px; font: inherit; font-size: 12px; line-height: 22px; cursor: pointer;
+	background: var(--ctl-bg); color: var(--vscode-dropdown-foreground, var(--vscode-foreground)); border: 1px solid var(--ctl-border); border-radius: 6px; color-scheme: light dark; transition: background-color .1s, border-color .1s; }
+select:hover { background: var(--ctl-bg-hover); border-color: var(--ctl-border-hover); }
+select:focus { outline: none; border-color: var(--vscode-focusBorder); }
 /* the open list: theme colors, otherwise it is white with light text */
 select option { background: var(--vscode-dropdown-listBackground, var(--vscode-dropdown-background)); color: var(--vscode-dropdown-foreground); }
 select option:checked { background: var(--vscode-list-activeSelectionBackground); color: var(--vscode-list-activeSelectionForeground); }
 
 /* primary button (overlay "Build project"): like .monaco-button */
-.overlay button { padding: 4px 11px; border: 1px solid var(--vscode-button-border, transparent); border-radius: 2px; background: var(--vscode-button-background); color: var(--vscode-button-foreground); font: inherit; cursor: pointer; line-height: 18px; }
+.overlay button { padding: 4px 12px; border: 1px solid var(--vscode-button-border, transparent); border-radius: 6px; background: var(--vscode-button-background); color: var(--vscode-button-foreground); font: inherit; cursor: pointer; line-height: 18px; }
 .overlay button:hover { background: var(--vscode-button-hoverBackground); }
 .sep { width: 1px; height: 16px; background: var(--vscode-menu-separatorBackground, var(--vscode-panel-border)); flex: none; }
 
