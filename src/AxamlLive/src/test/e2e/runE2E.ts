@@ -76,6 +76,7 @@ async function main() {
                 E2E_REPORT: process.env.E2E_REPORT,
                 E2E_INCLUDE: process.env.E2E_INCLUDE,
                 E2E_EXT: process.env.E2E_EXT,
+                E2E_THEME: process.env.E2E_THEME,
                 E2E_SCREENSHOT_ALL: process.env.E2E_SCREENSHOT_ALL,
             },
             launchArgs: [

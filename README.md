@@ -4,17 +4,20 @@ Live preview and editor features for Avalonia XAML (`.axaml`) files in Visual St
 while you type, completion, diagnostics, hover, go to definition and a formatter.
 
 AXAML Live is a free, MIT-licensed community project, based on the archived open source
-[AvaloniaVSCode](https://github.com/AvaloniaUI/AvaloniaVSCode) extension.
+[AvaloniaVSCode](https://github.com/AvaloniaUI/AvaloniaVSCode) extension. No account, no telemetry, no C# Dev Kit
+needed.
+
+![Live preview of an .axaml file in VS Code](docs/images/screenshot.png)
 
 ## Requirements
 
-| What               | Version                                      | Why                                                                                                                                                                       |
-| ------------------ | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Visual Studio Code | 1.79 or newer                                |                                                                                                                                                                           |
-| .NET SDK           | 8.0 or newer, the version your project needs | to build your app; the previewer runs your app's build output                                                                                                             |
-| .NET runtime       | 10.0 or newer                                | for the language server (completion, diagnostics, hover). If it is missing, it is downloaded for you by the .NET Install Tool extension, which is installed automatically |
-| Avalonia           | 11.x or 12.x                                 | in your project, as NuGet packages or built from source                                                                                                                   |
-| Operating system   | Windows, Linux or macOS (x64 or arm64)       | also works in Remote - WSL, Remote - SSH, Dev Containers and Codespaces                                                                                                   |
+| What | Version | Why |
+|---|---|---|
+| Visual Studio Code | 1.79 or newer | |
+| .NET SDK | 8.0 or newer, the version your project needs | to build your app; the previewer runs your app's build output |
+| .NET runtime | 10.0 or newer | for the language server (completion, diagnostics, hover). If it is missing, it is downloaded for you by the .NET Install Tool extension, which is installed automatically |
+| Avalonia | 11.x or 12.x | in your project, as NuGet packages or built from source |
+| Operating system | Windows, Linux or macOS (x64 or arm64) | also works in Remote - WSL, Remote - SSH, Dev Containers and Codespaces |
 
 Optional: the C# extension (`ms-dotnettools.csharp`) to **Run / Debug** with the debugger. Without it the project is
 started in a terminal.
@@ -68,26 +71,26 @@ Open the folder, open an `.axaml` file and click **Show preview** in the editor 
 
 ## Settings
 
-| Setting                                        | Default   |                                                                                          |
-| ---------------------------------------------- | --------- | ---------------------------------------------------------------------------------------- |
-| `axamlLive.previewer.autoOpen`                 | `false`   | open the preview when an .axaml file is opened                                           |
-| `axamlLive.previewer.defaultZoom`              | `1`       | a factor, `"fitAll"` or `"fitWidth"`                                                     |
-| `axamlLive.previewer.defaultThemeVariant`      | `Default` | `Default` (app theme), `Light`, `Dark`                                                   |
-| `axamlLive.previewer.defaultFormFactor`        | `default` | device size (`phone`, `tablet`, ...)                                                     |
-| `axamlLive.previewer.defaultFormFactorRotated` | `false`   | start rotated                                                                            |
-| `axamlLive.previewer.background`               | `theme`   | `theme`, `light`, `dark` or a color like `#1a1a1a`                                       |
-| `axamlLive.previewer.designDataContext`        | `true`    | preview views with a new instance of their view model                                    |
-| `axamlLive.previewer.enableInput`              | `true`    | send mouse and keyboard input to the preview                                             |
-| `axamlLive.previewer.fpsLimit`                 | `60`      | frames per second for animations, 0 = no limit                                           |
-| `axamlLive.previewer.maxRenderScale`           | `3`       | highest render scale when zoomed in                                                      |
-| `axamlLive.previewer.updateDelay`              | `300`     | milliseconds before unsaved changes are sent                                             |
-| `axamlLive.previewer.buildIfNeeded`            | `true`    | build automatically when there is no build output                                        |
-| `axamlLive.previewer.hostProject`              | `""`      | the app project that hosts the preview                                                   |
-| `axamlLive.previewer.syncWithLaunchConfig`     | `false`   | use the project started by launch.json                                                   |
-| `axamlLive.build.useInstalledSdk`              | `false`   | when global.json asks for a .NET SDK that is not installed, build with the installed one |
-| `axamlLive.showStyleAdornments`                | `true`    | show style badges                                                                        |
-| `axamlLive.editor.attributeQuoteStyle`         | `double`  | quotes used by completion and the formatter                                              |
-| `axamlLive.formatting.*`                       |           | attribute wrapping, markup extension wrapping, blank lines                               |
+| Setting | Default | |
+|---|---|---|
+| `axamlLive.previewer.autoOpen` | `false` | open the preview when an .axaml file is opened |
+| `axamlLive.previewer.defaultZoom` | `1` | a factor, `"fitAll"` or `"fitWidth"` |
+| `axamlLive.previewer.defaultThemeVariant` | `Default` | `Default` (app theme), `Light`, `Dark` |
+| `axamlLive.previewer.defaultFormFactor` | `default` | device size (`phone`, `tablet`, ...) |
+| `axamlLive.previewer.defaultFormFactorRotated` | `false` | start rotated |
+| `axamlLive.previewer.background` | `theme` | `theme`, `light`, `dark` or a color like `#1a1a1a` |
+| `axamlLive.previewer.designDataContext` | `true` | preview views with a new instance of their view model |
+| `axamlLive.previewer.enableInput` | `true` | send mouse and keyboard input to the preview |
+| `axamlLive.previewer.fpsLimit` | `60` | frames per second for animations, 0 = no limit |
+| `axamlLive.previewer.maxRenderScale` | `3` | highest render scale when zoomed in |
+| `axamlLive.previewer.updateDelay` | `300` | milliseconds before unsaved changes are sent |
+| `axamlLive.previewer.buildIfNeeded` | `true` | build automatically when there is no build output |
+| `axamlLive.previewer.hostProject` | `""` | the app project that hosts the preview |
+| `axamlLive.previewer.syncWithLaunchConfig` | `false` | use the project started by launch.json |
+| `axamlLive.build.useInstalledSdk` | `false` | when global.json asks for a .NET SDK that is not installed, build with the installed one |
+| `axamlLive.showStyleAdornments` | `true` | show style badges |
+| `axamlLive.editor.attributeQuoteStyle` | `double` | quotes used by completion and the formatter |
+| `axamlLive.formatting.*` | | attribute wrapping, markup extension wrapping, blank lines |
 
 ## Commands
 

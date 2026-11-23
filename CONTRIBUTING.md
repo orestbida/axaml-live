@@ -5,7 +5,7 @@ Thanks for helping with AXAML Live. This page explains how to build, run and tes
 ## Requirements
 
 1. .NET SDK 10.0 or newer: https://dotnet.microsoft.com/download (it also builds the net8.0 and netstandard parts)
-2. Node.js 20 or newer, with npm
+2. Node.js 22 or newer, with npm
 3. Visual Studio Code
 4. On Windows, Git Bash to run the build script
 
@@ -66,6 +66,16 @@ node out/test/e2e/runE2E.js /tmp/E2EApp "<path to Code executable>"
 Optional environment variables: `E2E_AXAML` (file to preview, default `MainWindow.axaml`), `E2E_BUILD_TARGET`
 (project for the external build, e.g. the Desktop head of an xplat solution), `E2E_PAUSE_MS`,
 `E2E_SCREENSHOT_DIR` (Windows: desktop screenshot per checkpoint), `E2E_GREP` (run matching tests only).
+
+### README screenshot
+
+`docs/images/screenshot.png` is taken with `E2E_SUITE=screenshot`: it opens one file next to its preview at 100%
+zoom, without side bars, and saves a desktop capture to `E2E_SCREENSHOT_DIR` (Windows). Crop it to the editor and the
+preview without scaling, so it stays sharp.
+
+```bash
+E2E_SUITE=screenshot E2E_AXAML=DashboardView.axaml E2E_SCREENSHOT_DIR=C:/temp/shot node out/test/e2e/runE2E.js <project> "<path to Code.exe>"
+```
 
 ### Remote (WSL)
 

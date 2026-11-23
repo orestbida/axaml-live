@@ -7,6 +7,8 @@ AXAML Live is a free, MIT-licensed community project, based on the archived open
 [AvaloniaVSCode](https://github.com/AvaloniaUI/AvaloniaVSCode) extension. No account, no telemetry, no C# Dev Kit
 needed.
 
+![Live preview of an .axaml file in VS Code](https://raw.githubusercontent.com/orestbida/AvaloniaVSCode/HEAD/docs/images/screenshot.png)
+
 ## Requirements
 
 | What | Version | Why |
