@@ -1,0 +1,66 @@
+# Code style: Java-like formatting, opening braces on the same line in every language.
+# Line endings are left to git (core.autocrlf), so they are not set here.
+root = true
+
+[*]
+charset = utf-8
+indent_style = space
+indent_size = 4
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+[*.{ts,js,mjs,cjs,css}]
+indent_style = space
+indent_size = 4
+max_line_length = 140
+
+[*.{json,jsonc,yml,yaml,csproj,props,targets,xml,axaml,xaml,slnx}]
+indent_size = 2
+
+[package.json]
+indent_size = 2
+
+[*.md]
+trim_trailing_whitespace = false
+
+# dotnet sln always writes tabs
+[*.sln]
+indent_style = tab
+
+[*.cs]
+max_line_length = 140
+
+# braces on the same line: if (x) {   } else {   } catch (e) {   } finally {
+csharp_new_line_before_open_brace = none
+csharp_new_line_before_else = false
+csharp_new_line_before_catch = false
+csharp_new_line_before_finally = false
+csharp_new_line_before_members_in_object_initializers = true
+csharp_new_line_before_members_in_anonymous_types = true
+csharp_new_line_between_query_expression_clauses = true
+
+csharp_indent_case_contents = true
+csharp_indent_switch_labels = true
+csharp_indent_labels = one_less_than_current
+csharp_indent_block_contents = true
+csharp_indent_braces = false
+
+csharp_space_after_cast = false
+csharp_space_after_keywords_in_control_flow_statements = true
+csharp_space_between_method_declaration_parameter_list_parentheses = false
+csharp_space_between_method_call_parameter_list_parentheses = false
+csharp_space_before_colon_in_inheritance_clause = true
+csharp_space_after_colon_in_inheritance_clause = true
+csharp_space_around_binary_operators = before_and_after
+
+csharp_preserve_single_line_blocks = true
+csharp_preserve_single_line_statements = false
+
+csharp_using_directive_placement = outside_namespace:suggestion
+csharp_style_namespace_declarations = file_scoped:suggestion
+# braces on every if/else/for/foreach/while/using/lock body
+csharp_prefer_braces = true:warning
+dotnet_diagnostic.IDE0011.severity = warning
+csharp_style_var_when_type_is_apparent = true:suggestion
+dotnet_sort_system_directives_first = true
+dotnet_separate_import_directive_groups = false
