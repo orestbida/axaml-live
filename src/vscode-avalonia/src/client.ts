@@ -1,54 +1,34 @@
 import * as vscode from "vscode";
 import * as lsp from "vscode-languageclient/node";
-import { getDotnetRuntimePath, getLanguageServerPath as getAvaloniaServerPath } from "./runtimeManager";
+import { getDotnetRuntimePath, getLanguageServerPath } from "./runtimeManager";
 import { avaloniaLanguageId, logger } from "./util/Utilities";
+import { getSolutionDataFile } from "./services/solutionParser";
 
-export async function createLanguageService(): Promise<lsp.LanguageClient> {
+export async function createLanguageService(context: vscode.ExtensionContext): Promise<lsp.LanguageClient> {
 	logger.appendLine("Creating language service");
 
-	const serverOptions = await getServerStartupOptions();
-	let outputChannel = logger;
+	const executable: lsp.Executable = {
+		command: await getDotnetRuntimePath(),
+		args: [getLanguageServerPath(context)],
+		options: {
+			// tells the server which solution model to use (same file the extension writes)
+			env: { ...process.env, AVALONIA_SOLUTION_DATA: getSolutionDataFile(context) },
+		},
+	};
 
 	const clientOptions: lsp.LanguageClientOptions = {
 		documentSelector: [{ language: avaloniaLanguageId }],
 		progressOnInitialization: true,
-		outputChannel,
+		outputChannel: logger,
 		synchronize: {
 			configurationSection: "avalonia",
 			fileEvents: vscode.workspace.createFileSystemWatcher("**/*.axaml"),
 		},
 		middleware: {
 			provideDocumentFormattingEdits: (document, options, token, next) =>
-				next(
-					document,
-					{
-						...options,
-						insertFinalNewline: true,
-					},
-					token
-				),
+				next(document, { ...options, insertFinalNewline: true }, token),
 		},
 	};
 
-	const client = new lsp.LanguageClient(avaloniaLanguageId, "Avalonia LSP", serverOptions, clientOptions);
-
-	return client;
-}
-
-async function getServerStartupOptions(): Promise<lsp.ServerOptions> {
-	const dotnetCommandPath = await getDotnetRuntimePath();
-	const serverPath = getAvaloniaServerPath();
-
-	const executable = {
-		command: dotnetCommandPath,
-		args: [serverPath],
-		options: {
-			env: process.env,
-		},
-	};
-
-	return {
-		run: executable,
-		debug: executable,
-	};
+	return new lsp.LanguageClient(avaloniaLanguageId, "Avalonia LSP", { run: executable, debug: executable }, clientOptions);
 }

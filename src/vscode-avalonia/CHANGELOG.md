@@ -2,6 +2,49 @@
 
 All notable changes to the "vscode-avalonia" extension will be documented in this file.
 
+## [0.1.0] - 23 November 2026
+
+Community fork of the archived MIT extension. The previewer was rewritten for reliability; issue numbers refer to
+[AvaloniaUI/AvaloniaVSCode](https://github.com/AvaloniaUI/AvaloniaVSCode/issues).
+
+New:
+
+- **New Avalonia Item…** in the Explorer folder context menu: Window, UserControl, TemplatedControl, Styles, ResourceDictionary, with the right namespace; F# files are added to the `.fsproj` compile list (#38, #116, #128, #118).
+- Preview toolbar: Restart, Build, Log, zoom (−/+, Ctrl+Wheel) (#96, #12, #78).
+- `.axaml.cs` / `.axaml.fs` files are nested under their `.axaml` in the Explorer (when file nesting is enabled).
+- Settings: `avalonia.previewer.updateDelay`, `avalonia.previewer.buildIfNeeded`, `avalonia.previewer.defaultZoom`.
+
+Previewer:
+
+- Building while the previewer is open no longer fails with "file is locked" (#115, #165). The previewer runs from a shadow copy of the build output.
+- The preview reloads automatically after **any** build: the Build button, `dotnet build` in a terminal, C# Dev Kit (#152, #179).
+- Live preview of unsaved edits.
+- XAML errors are shown in the preview and in the Problems view with the correct line (#112, #79, #164).
+- No more blank preview: the frame is loaded only after the previewer reports that its HTTP server is ready.
+- Restarting the previewer no longer breaks the connection (one TCP server per session; previously a stale server kept the old port), and TCP messages are framed correctly (#94, #87, #96).
+- Moving or resizing the preview tab does not break it (#87); closing it stops the previewer process (AvaloniaPro #188).
+- Missing build output is built automatically (#71, #81, #82).
+- Projects with `PublishAot` / trimming no longer fail with "Dynamic code generation is not supported on this platform" (#151).
+- Remote development, Codespaces and WSL: the previewer port is forwarded to the local UI (#131, #122, #53).
+- Tested with Avalonia 12.2 (net10.0) and 11.3 (net9.0), C# and F# projects, an xplat solution and a path with spaces.
+
+Projects and solutions:
+
+- The language server and solution parser run on the newest installed .NET (8 or later) and honor `global.json`: fixes "Could not find a matching .NET SDK" (#178) and .NET 8-only machines (#153, #157, #159, #120, #77).
+- `.slnx` solutions (#162); choosing between multiple solutions, `Avalonia: Select solution` (#101).
+- XAML in class libraries is hosted by the executable project that references it (avalonia.xplat, Desktop head preferred) (#155, #32, #10).
+- `Exe` output type (#80), multi-targeted projects (#99), paths with different drive letter case on Windows.
+- Project references were resolved relative to the project file instead of its folder.
+- Processes are started without a shell: paths with spaces work (#41, #43); a missing `dotnet` no longer hangs project creation (#114).
+
+Code completion:
+
+- Closing tags and prefixed names are inserted correctly: `</` gives `</Grid>` instead of `<//Grid>` (#166).
+- Class library projects without an executable get completion (#169). The completion engine never looked in the NuGet cache (it used the literal string "USERPROFILE" as the home folder), so assemblies that are not copied to `bin` were missing.
+- Completion uses the project of the edited file and reloads when that project is rebuilt; no VS Code restart needed (#29, #179).
+- Works for names with dots (#171), `AssemblyName`, `UseArtifactsOutput` and Release builds (#119, #138): the server uses the solution model instead of guessing `bin/Debug`.
+- The solution is parsed on startup, so completion works for projects built outside VS Code (#152, #51).
+
 ## [0.0.27] - 18 January 2024
 
 Fixes:

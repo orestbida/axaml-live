@@ -67,6 +67,7 @@ export class CreateNewProject implements Command {
 
 		return new Promise((resolve, reject) => {
 			const dotnet = spawn("dotnet", ["new", template, "-n", projectName, "-o", projectPath]);
+			dotnet.on("error", (e) => reject(`Failed to run dotnet: ${e.message}`));
 			dotnet.stderr.on("data", (data) => {
 				logger.error(data.toString());
 			});

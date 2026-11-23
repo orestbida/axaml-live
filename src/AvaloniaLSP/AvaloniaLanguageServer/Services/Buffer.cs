@@ -8,7 +8,8 @@ public sealed class Buffer
         string[] lines = _text.Split(separator, StringSplitOptions.None);
         string text = string.Join("\n", lines[..position.Line]);
         string line = lines[position.Line][..position.Character];
-        return $"{text}\n{line}";
+        // no leading newline for the first line, offsets must map back to positions
+        return position.Line == 0 ? line : $"{text}\n{line}";
     }
 
     public string? GetLine(Position position)

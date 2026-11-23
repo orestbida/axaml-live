@@ -1,9 +1,9 @@
 {
-  "name": "vscode-avalonia",
-  "displayName": "Avalonia for VSCode",
-  "description": "Avalonia tools for Visual Studio Code",
-  "publisher": "AvaloniaTeam",
-  "version": "0.0.32",
+  "name": "vscode-avalonia-community",
+  "displayName": "Avalonia for VSCode (Community)",
+  "description": "Community-maintained MIT Avalonia tools for VS Code: AXAML completion and live previewer",
+  "publisher": "AvaloniaCommunity",
+  "version": "0.1.0",
   "license": "MIT",
   "preview": true,
   "qna": "false",
@@ -74,7 +74,7 @@
     "commands": [
       {
         "command": "avalonia.createPreviewerAssets",
-        "title": "Create previewer assets",
+        "title": "Build project and reload preview",
         "category": "Avalonia"
       },
       {
@@ -84,8 +84,24 @@
         "icon": "$(open-preview)"
       },
       {
+        "command": "avalonia.restartPreviewer",
+        "title": "Restart previewer",
+        "category": "Avalonia",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "avalonia.selectSolution",
+        "title": "Select solution",
+        "category": "Avalonia"
+      },
+      {
         "command": "avalonia.newProject",
         "title": "Create a new Avalonia Project",
+        "category": "Avalonia"
+      },
+      {
+        "command": "avalonia.newItem",
+        "title": "New Avalonia Item…",
         "category": "Avalonia"
       }
     ],
@@ -100,8 +116,14 @@
       "commandPalette": [
         {
           "command": "avalonia.showPreviewToSide",
-          "when": "resourceLangId == AXAML",
-          "group": "Avalonia"
+          "when": "resourceLangId == AXAML"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "avalonia.newItem",
+          "when": "explorerResourceIsFolder",
+          "group": "navigation@9"
         }
       ]
     },
@@ -119,6 +141,24 @@
             ],
             "default": "messages",
             "description": "Traces the communication between VS Code and the language server."
+          },
+          "avalonia.previewer.updateDelay": {
+            "type": "number",
+            "default": 300,
+            "minimum": 0,
+            "description": "Delay in milliseconds before unsaved AXAML edits are sent to the previewer."
+          },
+          "avalonia.previewer.buildIfNeeded": {
+            "type": "boolean",
+            "default": true,
+            "description": "Automatically build the project when the previewer needs build output that does not exist yet."
+          },
+          "avalonia.previewer.defaultZoom": {
+            "type": "number",
+            "default": 1,
+            "minimum": 0.25,
+            "maximum": 4,
+            "description": "Initial zoom factor of the previewer (1 = 100%). Use the -/+ buttons or Ctrl+Wheel in the preview to change it."
           }
         }
       }
@@ -128,7 +168,12 @@
         "language": "csharp",
         "path": "./csharp.json"
       }
-    ]
+    ],
+    "configurationDefaults": {
+      "explorer.fileNesting.patterns": {
+        "*.axaml": "${capture}.axaml.cs, ${capture}.axaml.fs"
+      }
+    }
   },
   "scripts": {
     "install:all": "yarn install",
@@ -137,7 +182,8 @@
     "watch": "tsc -watch -p ./",
     "pretest": "yarn run compile && yarn run lint",
     "lint": "eslint src --ext ts",
-    "test": "node ./out/test/runTest.js"
+    "test": "node ./out/test/runTest.js",
+    "e2e": "node ./out/test/e2e/runE2E.js"
   },
   "devDependencies": {
     "@types/fs-extra": "^11.0.1",
@@ -162,11 +208,13 @@
     "glob": "^8.1.0",
     "portfinder": "^1.0.32",
     "strongly-typed-events": "^3.0.11",
-    "tree-kill": "^1.2.2",
     "vscode-languageclient": "^8.1.0",
     "xpath": "^0.0.32"
   },
   "extensionDependencies": [
     "ms-dotnettools.vscode-dotnet-runtime"
+  ],
+  "extensionKind": [
+    "workspace"
   ]
 }

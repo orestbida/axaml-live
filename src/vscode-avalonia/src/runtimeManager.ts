@@ -3,50 +3,43 @@ import * as path from "path";
 import { AppConstants, logger } from "./util/Utilities";
 
 /**
- * The version of the .NET runtime to acquire.
+ * The minimum version of the .NET runtime needed by the language server and the solution parser.
  */
-const dotnetRuntimeVersion = "9.0";
+const dotnetRuntimeVersion = "8.0"; // tools roll forward to the newest installed runtime
 
 interface IDotnetAcquireResult {
-    dotnetPath: string;
+	dotnetPath: string;
 }
 
+let cachedPath: string | undefined;
+
 /**
- * Gets the path to the .NET runtime.
- * @returns A promise that resolves to the path to the .NET runtime.
- * @throws An error if the .NET runtime path could not be resolved.
+ * Gets the path to a .NET runtime >= 9.0, preferring the globally installed one.
  */
 export async function getDotnetRuntimePath(): Promise<string> {
-	const path = await vscode.commands.executeCommand<IDotnetAcquireResult>("dotnet.findPath", {
+	if (cachedPath) {
+		return cachedPath;
+	}
+	const result = await vscode.commands.executeCommand<IDotnetAcquireResult>("dotnet.findPath", {
 		acquireContext: {
 			version: dotnetRuntimeVersion,
 			requestingExtensionId: AppConstants.extensionId,
-			mode: 'runtime',
-			installType: 'global',
-			architecture: process.arch
+			mode: "runtime",
+			installType: "global",
+			architecture: process.arch,
 		},
-		versionSpecRequirement: 'greater_than_or_equal'
+		versionSpecRequirement: "greater_than_or_equal",
 	});
 
-	if (!path) {
-		const message = `.NET ${dotnetRuntimeVersion} was not found. Please make sure it's installed globally.`;
+	if (!result?.dotnetPath) {
+		const message = `.NET ${dotnetRuntimeVersion} or newer was not found. Please make sure it's installed globally.`;
 		logger.error(message);
 		throw new Error(message);
 	}
-
-	return path.dotnetPath;
+	cachedPath = result.dotnetPath;
+	return cachedPath;
 }
 
-/**
- * Gets the path to the Avalonia language server.
- * @returns The path to the Avalonia language server.
- * @throws An error if the extension could not be found.
- */
-export function getLanguageServerPath() {
-	const avaloniaExtn = vscode.extensions.getExtension(AppConstants.extensionId);
-	if (!avaloniaExtn) {
-		throw new Error("Could not find Avalonia extension.");
-	}
-	const serverLocation = path.join(avaloniaExtn.extensionPath, "avaloniaServer", "AvaloniaLanguageServer.dll");
-	return serverLocation;
+export function getLanguageServerPath(context: vscode.ExtensionContext) {
+	return path.join(context.extensionPath, "avaloniaServer", "AvaloniaLanguageServer.dll");
 }

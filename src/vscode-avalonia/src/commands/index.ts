@@ -1,23 +1,20 @@
 import * as vscode from "vscode";
 import { CommandManager } from "../commandManager";
-import { ShowPreviewToSideCommand } from "./ShowPreviewToSideCommand";
-import { CreatePreviewerAssets } from "./createPreviewerAssets";
-import { PreviewerProcess } from "./previewerProcess";
-import { PreviewProcessManager } from "../previewProcessManager";
-import { UpdatePreviewerContext } from "./updatePreviewerContent";
+import { RestartPreviewerCommand, ShowPreviewToSideCommand } from "./ShowPreviewToSideCommand";
+import { CreatePreviewerAssets, SelectSolutionCommand } from "./createPreviewerAssets";
 import { CreateNewProject } from "./createNewProject";
-
-const processManager = new PreviewProcessManager();
+import { NewItemCommand } from "./newItem";
+import { PreviewController } from "../services/previewController";
 
 export function registerAvaloniaCommands(
 	commandManager: CommandManager,
-	context: vscode.ExtensionContext
+	controller: PreviewController
 ): vscode.Disposable {
 	commandManager.register(new CreateNewProject());
-	commandManager.register(new ShowPreviewToSideCommand(context, processManager));
-	commandManager.register(new CreatePreviewerAssets(context));
-	commandManager.register(new PreviewerProcess(context, processManager));
-	commandManager.register(new UpdatePreviewerContext(context));
-
+	commandManager.register(new NewItemCommand());
+	commandManager.register(new ShowPreviewToSideCommand(controller));
+	commandManager.register(new RestartPreviewerCommand(controller));
+	commandManager.register(new CreatePreviewerAssets(controller));
+	commandManager.register(new SelectSolutionCommand(controller));
 	return commandManager;
 }

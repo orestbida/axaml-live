@@ -11,11 +11,9 @@ public class CompletionHandler : CompletionHandlerBase
         if (request.InsertText == null || !NeedResolve())
             return Task.FromResult(request);
 
-        var ci = new CompletionItem
+        // keep TextEdit/FilterText etc. from the original item
+        var ci = request with
         {
-            Label = request.Label,
-            Kind = request.Kind,
-            InsertText = request.InsertText,
             Command = Command.Create("avalonia.InsertProperty", new { repositionCaret = RepositionCaret() })
         };
 
@@ -49,6 +47,10 @@ public class CompletionHandler : CompletionHandlerBase
 
         var set = _completionEngine.GetCompletions(metadata!, text, text.Length);
 
+        // The engine reports where the completed token starts (e.g. at "/" for "</Grid>" or at "vm:" for "<vm:Foo").
+        // Without an explicit range VS Code only replaces the current word, which produced "<//Grid>" (#166).
+        var range = set == null ? null : new OmniSharp.Extensions.LanguageServer.Protocol.Models.Range(OffsetToPosition(text, set.StartPosition), request.Position);
+
         var completions = set?.Completions
             .Where(p => !p.DisplayText.Contains('`'))
             .Select(p => new CompletionItem
@@ -56,6 +58,8 @@ public class CompletionHandler : CompletionHandlerBase
                 Label = p.DisplayText,
                 Detail = p.Description,
                 InsertText = p.InsertText,
+                FilterText = p.InsertText,
+                TextEdit = range == null ? null : new TextEditOrInsertReplaceEdit(new TextEdit { Range = range, NewText = p.InsertText }),
                 Kind = GetCompletionItemKind(p.Kind),
             });
 
@@ -80,13 +84,11 @@ public class CompletionHandler : CompletionHandlerBase
 
     async Task<Metadata?> InitializeCompletionEngineAsync(DocumentUri uri)
     {
-        if (_workspace.ProjectInfo is not { IsAssemblyExist: true })
-            return null;
-
-        if (_workspace.ProjectInfo.IsAssemblyExist && _workspace.CompletionMetadata == null)
-        {
+        // the workspace is shared by all documents: re-target when the document is from another project
+        if (_workspace.ProjectInfo == null || !_workspace.IsCurrentProject(uri))
             await _workspace.InitializeAsync(uri, _getServer()?.Client.ClientSettings.RootPath);
-        }
+        else
+            _workspace.RefreshMetadataIfNeeded();
 
         return _workspace.CompletionMetadata;
     }
@@ -98,6 +100,21 @@ public class CompletionHandler : CompletionHandlerBase
         _getServer = getServer;
 
         _completionEngine = new CompletionEngine();
+    }
+
+    static Position OffsetToPosition(string text, int offset)
+    {
+        offset = Math.Clamp(offset, 0, text.Length);
+        int line = 0, lineStart = 0;
+        for (int i = 0; i < offset; i++)
+        {
+            if (text[i] == (char)10)
+            {
+                line++;
+                lineStart = i + 1;
+            }
+        }
+        return new Position(line, offset - lineStart);
     }
 
     static CompletionItemKind GetCompletionItemKind(CompletionKind completionKind)
