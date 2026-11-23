@@ -252,7 +252,7 @@
           },
           "avalonia.previewer.fpsLimit": {
             "type": "number",
-            "default": 30,
+            "default": 60,
             "minimum": 0,
             "description": "Maximum frames per second of the previewer (animations). 0 = unlimited. Lower values reduce CPU usage."
           },

@@ -17,6 +17,7 @@
 	let frame = null; // { width, height, scale }
 	let options = { theme: "Default", formFactor: "default", rotated: false, inputEnabled: true, maxRenderScale: 3 };
 	let lastView = "";
+	let pendingFrame = null;
 
 	// ---------- toolbar ----------
 	const zoomSelect = $("zoom");
@@ -214,7 +215,17 @@
 		const msg = e.data;
 		switch (msg.type) {
 			case "frame":
-				drawFrame(msg.frame);
+				// draw only the newest frame once per display refresh (smooth animations, no backlog)
+				if (!pendingFrame) {
+					requestAnimationFrame(() => {
+						const f = pendingFrame;
+						pendingFrame = null;
+						if (f) {
+							drawFrame(f);
+						}
+					});
+				}
+				pendingFrame = msg.frame;
 				break;
 			case "setZoom":
 				setZoom(msg.zoom);
@@ -224,7 +235,8 @@
 				$("theme").value = options.theme;
 				$("formFactor").value = options.formFactor;
 				$("rotate").disabled = options.formFactor === "default";
-				$("input").classList.toggle("off", !options.inputEnabled);
+				$("input").classList.toggle("checked", options.inputEnabled);
+				$("input").setAttribute("aria-pressed", String(options.inputEnabled));
 				frameBox.classList.toggle("device", options.formFactor !== "default");
 				canvas.style.cursor = options.inputEnabled ? "default" : "not-allowed";
 				lastView = "";

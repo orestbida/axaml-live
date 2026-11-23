@@ -228,6 +228,39 @@ suite("Avalonia previewer (e2e)", () => {
 		}
 	});
 
+	test("form factor, theme and edits apply while an animation runs (no reload needed)", async () => {
+		await showMain();
+		const original = editor.document.getText();
+		const head = original.substring(0, original.indexOf(">", original.indexOf("<Window")) + 1);
+		const animated = (label: string) =>
+			`${head}<StackPanel Spacing="8" Margin="20"><ProgressBar IsIndeterminate="True" Width="300"/><TextBlock Text="${label}"/></StackPanel></Window>`;
+		const replaceAll = (text: string) =>
+			editor.edit((e) => e.replace(new vscode.Range(editor.document.positionAt(0), editor.document.positionAt(editor.document.getText().length)), text));
+		try {
+			await replaceAll(animated("one"));
+			await sleep(1500); // frames of the animated window are flowing, acknowledgements in flight
+			for (const ff of [{ id: "phone", w: 390, h: 844 }, { id: "tablet", w: 768, h: 1024 }]) {
+				await previewCommand({ type: "setFormFactor", id: ff.id, rotated: false });
+				await waitFor(`${ff.id} size while animating`, (s) => s.preview?.frame?.logicalWidth === ff.w && s.preview?.frame?.logicalHeight === ff.h, 15000);
+				const f0 = frames(await state());
+				await sleep(1000);
+				assert.ok(frames(await state()) > f0 + 5, `animation stopped after switching to ${ff.id}`);
+			}
+			await previewCommand({ type: "setTheme", value: "Dark" });
+			await waitFor("dark while animating", (s) => (s.preview?.frame?.avgLum ?? 255) < 110, 15000);
+			const before = frames(await state());
+			await replaceAll(animated("two"));
+			await sleep(1500);
+			assert.ok(frames(await state()) > before + 5, "animation stopped after an edit");
+			await checkpoint("animated-form-factor");
+		} finally {
+			await previewCommand({ type: "setTheme", value: "Default" });
+			await previewCommand({ type: "setFormFactor", id: "default", rotated: false });
+			await replaceAll(original);
+			await editor.document.save();
+		}
+	});
+
 	test("live update of unsaved edits", async () => {
 		await showMain();
 		const text = editor.document.getText();

@@ -61,6 +61,7 @@ export class PreviewController implements vscode.Disposable {
 	private _frames = 0;
 	private _frameTimes: number[] = [];
 	private _frameInfo: FrameInfo | undefined;
+	private _lastFrameData: Buffer | undefined;
 	private _inputsForwarded = 0;
 
 	constructor(private readonly _context: vscode.ExtensionContext) {
@@ -118,7 +119,7 @@ export class PreviewController implements vscode.Disposable {
 	}
 
 	private get fpsLimit(): number {
-		return Math.max(0, this.config.get<number>("fpsLimit", 30));
+		return Math.max(0, this.config.get<number>("fpsLimit", 60));
 	}
 
 	private get panelOptions(): PanelOptions {
@@ -251,14 +252,17 @@ export class PreviewController implements vscode.Disposable {
 		logger.debug(`Frame ${frame.sequenceId} ${frame.width}x${frame.height} scale=${frame.scale}`);
 		const now = Date.now();
 		this._frameTimes.push(now);
-		this._frameTimes = this._frameTimes.filter((t) => now - t <= 2000);
+		while (this._frameTimes.length && now - this._frameTimes[0] > 2000) {
+			this._frameTimes.shift();
+		}
+		this._lastFrameData = frame.data; // statistics are computed on demand, not per frame
 		this._frameInfo = {
 			width: frame.width,
 			height: frame.height,
 			scale: frame.scale,
 			logicalWidth: Math.round(frame.width / frame.scale),
 			logicalHeight: Math.round(frame.height / frame.scale),
-			avgLum: Math.round(averageLuminance(frame.data) * 10) / 10,
+			avgLum: -1,
 		};
 		this._panel?.showFrame({
 			width: frame.width,
@@ -589,7 +593,10 @@ export class PreviewController implements vscode.Disposable {
 			building: !!this._building,
 			preview: {
 				frames: this._frames,
-				frame: this._frameInfo,
+				frame: this._frameInfo && {
+					...this._frameInfo,
+					avgLum: this._lastFrameData ? Math.round(averageLuminance(this._lastFrameData) * 10) / 10 : -1,
+				},
 				zoom: this._view?.zoom,
 				stage: this._view ? { width: this._view.stageWidth, height: this._view.stageHeight } : undefined,
 				theme: this._theme,

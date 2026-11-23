@@ -168,7 +168,75 @@ export class PreviewSession implements vscode.Disposable {
 		const assemblyPath = this.mapAssembly(file.targetPath);
 		const projectDir = path.dirname(file.projectPath);
 		const relative = "/" + path.relative(projectDir, file.path).split(path.sep).join("/");
+		// each update opens a new design window: from now on no acknowledgement may reach it before its own first frame
+		this.cancelPendingAcks();
+		this._pendingUpdates++;
 		this._socket.write(Messages.updateXamlMessage(assemblyPath, text, relative));
+	}
+
+	/**
+	 * Frame flow control across design windows. The designer renders a window only while
+	 * lastReceivedFrame == lastSentFrame, and lastReceivedFrame = Math.Max(ack, lastReceivedFrame). Each XAML update
+	 * creates a new window whose counters start at 0, so a late acknowledgement for a frame of the previous window
+	 * (e.g. sequence 250 while an animation runs) blocks the new window forever. Therefore, while updates are pending,
+	 * frames are held (not shown, not acknowledged) until the designer answers with UpdateXamlResult.
+	 */
+	private _pendingUpdates = 0;
+	private _held: { socket: net.Socket; frame: PreviewFrame } | undefined;
+	private _ackTimers = new Set<NodeJS.Timeout>();
+	private _lastAccepted: { socket: net.Socket; sequenceId: number } | undefined;
+	private _ackCancelled = false;
+
+	private cancelPendingAcks() {
+		if (this._ackTimers.size) {
+			this._ackCancelled = true;
+		}
+		this._ackTimers.forEach((t) => clearTimeout(t));
+		this._ackTimers.clear();
+	}
+
+	private onUpdateResult(failed: boolean) {
+		this._pendingUpdates = Math.max(0, this._pendingUpdates - 1);
+		if (this._pendingUpdates > 0) {
+			return;
+		}
+		const held = this._held;
+		this._held = undefined;
+		if (failed) {
+			// no new window: the previous one stays current and must keep receiving acknowledgements
+			if (held) {
+				this.acceptFrame(held.socket, held.frame);
+			} else if (this._ackCancelled && this._lastAccepted) {
+				this.ack(this._lastAccepted.socket, this._lastAccepted.sequenceId);
+			}
+		} else if (held && held.frame.sequenceId === 1) {
+			// the first frame of the new window arrived before the result
+			this.acceptFrame(held.socket, held.frame);
+		}
+		// otherwise: a stale frame of the closed window, dropped
+		this._ackCancelled = false;
+	}
+
+	private acceptFrame(socket: net.Socket, frame: PreviewFrame) {
+		this._lastAccepted = { socket, sequenceId: frame.sequenceId };
+		this._onFrame.fire(frame);
+		// the designer sends the next frame only after this acknowledgement: delaying it caps the frame rate
+		const delay = this._limiter.delay(Date.now());
+		if (delay > 0) {
+			const timer = setTimeout(() => {
+				this._ackTimers.delete(timer);
+				this.ack(socket, frame.sequenceId);
+			}, delay);
+			this._ackTimers.add(timer);
+		} else {
+			this.ack(socket, frame.sequenceId);
+		}
+	}
+
+	private ack(socket: net.Socket, sequenceId: number) {
+		if (!socket.destroyed) {
+			socket.write(Messages.frameReceivedMessage(sequenceId));
+		}
 	}
 
 	/** Maps an assembly from the project output to its shadow copy. */
@@ -254,6 +322,7 @@ export class PreviewSession implements vscode.Disposable {
 						result.exceptionType = undefined;
 					}
 				}
+				this.onUpdateResult(!!(result.error || result.message));
 				this._onXamlResult.fire(result);
 				break;
 			}
@@ -273,23 +342,22 @@ export class PreviewSession implements vscode.Disposable {
 			: body.Data?.buffer
 				? Buffer.from(body.Data.buffer)
 				: undefined;
-		if (data && body.Width > 0 && body.Height > 0) {
-			this._onFrame.fire({
-				sequenceId,
-				width: body.Width,
-				height: body.Height,
-				stride: body.Stride,
-				scale: (body.DpiX || 96) / 96,
-				data,
-			});
+		const frame: PreviewFrame = {
+			sequenceId,
+			width: body.Width,
+			height: body.Height,
+			stride: body.Stride,
+			scale: (body.DpiX || 96) / 96,
+			data: data ?? Buffer.alloc(0),
+		};
+		if (this._pendingUpdates > 0) {
+			this._held = { socket, frame }; // decided when the update result arrives
+			return;
 		}
-		// the designer sends the next frame only after this acknowledgement: delaying it caps the frame rate
-		const ack = () => !socket.destroyed && socket.write(Messages.frameReceivedMessage(sequenceId));
-		const delay = this._limiter.delay(Date.now());
-		if (delay > 0) {
-			setTimeout(ack, delay);
+		if (data && body.Width > 0 && body.Height > 0) {
+			this.acceptFrame(socket, frame);
 		} else {
-			ack();
+			this.ack(socket, sequenceId);
 		}
 	}
 
@@ -357,6 +425,7 @@ export class PreviewSession implements vscode.Disposable {
 		}
 		this._onDidChangeState.dispose();
 		this._onXamlResult.dispose();
+		this.cancelPendingAcks();
 		this._onFrame.dispose();
 	}
 }

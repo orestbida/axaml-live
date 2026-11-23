@@ -59,7 +59,7 @@ export class WebPreviewerPanel implements vscode.Disposable {
 			AppConstants.previewerPanelViewType,
 			"Preview",
 			{ viewColumn: column, preserveFocus: true },
-			{ enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [vscode.Uri.joinPath(_extensionUri, "media")] }
+			{ enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [vscode.Uri.joinPath(_extensionUri, "media"), vscode.Uri.joinPath(_extensionUri, "node_modules", "@vscode", "codicons", "dist")] }
 		);
 		this._panel.iconPath = {
 			dark: vscode.Uri.joinPath(_extensionUri, "media", "preview-dark.svg"),
@@ -146,6 +146,7 @@ export class WebPreviewerPanel implements vscode.Disposable {
 	private getHtml() {
 		const webview = this._panel.webview;
 		const nonce = getNonce();
+		const codicons = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, "node_modules", "@vscode", "codicons", "dist", "codicon.css"));
 		const media = (f: string) => webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, "media", f));
 		const config = vscode.workspace.getConfiguration("avalonia.previewer");
 		const init = {
@@ -156,28 +157,33 @@ export class WebPreviewerPanel implements vscode.Disposable {
 <html>
 <head>
 <meta charset="utf-8"/>
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${webview.cspSource} data:; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${webview.cspSource} data:; font-src ${webview.cspSource}; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="stylesheet" href="${codicons}">
 <link rel="stylesheet" href="${media("previewer.css")}">
 </head>
 <body>
-	<div class="toolbar">
+	<div class="toolbar" role="toolbar">
 		<span id="dot" class="dot"></span>
 		<span id="status" class="status" title="Click to choose the project that hosts the previewer">Waiting…</span>
-		<button id="zoomOut" title="Zoom out (Ctrl+Wheel)">−</button>
-		<select id="zoom" title="Zoom"></select>
-		<button id="zoomIn" title="Zoom in (Ctrl+Wheel)">+</button>
+		<div class="group">
+			<button id="zoomOut" class="action codicon codicon-zoom-out" title="Zoom out (Ctrl+Wheel)"></button>
+			<span class="select"><select id="zoom" title="Zoom"></select></span>
+			<button id="zoomIn" class="action codicon codicon-zoom-in" title="Zoom in (Ctrl+Wheel)"></button>
+		</div>
 		<span class="sep"></span>
-		<select id="theme" title="Theme variant">
-			<option value="Default">App theme</option><option value="Light">Light</option><option value="Dark">Dark</option>
-		</select>
-		<select id="formFactor" title="Form factor"></select>
-		<button id="rotate" title="Rotate">⟲</button>
-		<button id="input" title="Mouse and keyboard input to the preview">🖱</button>
+		<div class="group">
+			<span class="select"><select id="theme" title="Theme variant"><option value="Default">App theme</option><option value="Light">Light</option><option value="Dark">Dark</option></select></span>
+			<span class="select"><select id="formFactor" title="Form factor"></select></span>
+			<button id="rotate" class="action codicon codicon-arrow-swap" title="Rotate"></button>
+			<button id="input" class="action codicon codicon-inspect" title="Mouse and keyboard input to the preview" aria-pressed="true"></button>
+		</div>
 		<span class="sep"></span>
-		<button id="restart" title="Restart the previewer process">⟳</button>
-		<button id="build" title="Build the project and reload the preview">Build</button>
-		<button id="log" title="Show the Avalonia output log">≡</button>
+		<div class="group">
+			<button id="restart" class="action codicon codicon-debug-restart" title="Restart the previewer"></button>
+			<button id="build" class="action codicon codicon-tools" title="Build the project and reload the preview"></button>
+			<button id="log" class="action codicon codicon-output" title="Show the Avalonia output log"></button>
+		</div>
 	</div>
 	<div id="stage" class="stage">
 		<div id="frameBox" class="frame-box"><canvas id="canvas" tabindex="0"></canvas></div>
