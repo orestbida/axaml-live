@@ -1,7 +1,6 @@
 import * as assert from "assert";
 import * as path from "path";
 import * as fs from "fs";
-import * as http from "http";
 import * as vscode from "vscode";
 import { execFile } from "child_process";
 import { e2eSetting, windowsScreenshot } from "./config";
@@ -20,7 +19,26 @@ type State = {
 	sessionsStarted: number;
 	lastXaml?: { error?: string; message?: string; line?: number };
 	building: boolean;
+	preview?: {
+		frames: number;
+		frame?: { width: number; height: number; scale: number; logicalWidth: number; logicalHeight: number; avgLum: number };
+		zoom?: number;
+		stage?: { width: number; height: number };
+		theme: string;
+		formFactor: string;
+		rotated: boolean;
+		inputEnabled: boolean;
+		inputsForwarded: number;
+		fpsLimit: number;
+		recentFps: number;
+	};
+	styleBadges?: number;
+	previewerPid?: number;
 };
+
+/** Sends a message exactly as the preview webview toolbar would. */
+const previewCommand = (msg: object) => vscode.commands.executeCommand("avalonia.debug.previewCommand", msg);
+const frames = (s: State) => s.preview?.frames ?? 0;
 
 const state = async () => (await vscode.commands.executeCommand<State>("avalonia.debug.state"))!;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -84,8 +102,7 @@ suite("Avalonia previewer (e2e)", () => {
 
 	test("shows the preview (builds if needed)", async () => {
 		await vscode.commands.executeCommand("avalonia.showPreviewToSide", editor.document.uri);
-		const s = await waitFor("preview ready", (s) => s.sessionState === "ready" && s.panelState?.status === "ready", 240000);
-		assert.ok(s.htmlUrl?.startsWith("http://127.0.0.1:"));
+		await waitFor("preview ready", (s) => s.sessionState === "ready" && s.panelState?.status === "ready", 240000);
 		// the unmodified file must render without errors
 		const r = await waitFor("first XAML result", (s) => !!s.lastXaml, 60000);
 		assert.ok(!r.lastXaml?.error && !r.lastXaml?.message, `initial preview error: ${r.lastXaml?.message ?? r.lastXaml?.error}`);
@@ -93,6 +110,123 @@ suite("Avalonia previewer (e2e)", () => {
 	});
 
 	const showMain = async () => (editor = await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(mainWindow), vscode.ViewColumn.One));
+	const designSize = () => {
+		const t = fs.readFileSync(mainWindow, "utf8");
+		return { w: Number(/d:DesignWidth="(\d+)"/.exec(t)?.[1] ?? 0), h: Number(/d:DesignHeight="(\d+)"/.exec(t)?.[1] ?? 0) };
+	};
+
+	test("frames are rendered by the extension (own previewer renderer)", async () => {
+		const s = await waitFor("a frame", (s) => !!s.preview?.frame, 30000);
+		const { w, h } = designSize();
+		if (w && h) {
+			assert.strictEqual(s.preview!.frame!.logicalWidth, w);
+			assert.strictEqual(s.preview!.frame!.logicalHeight, h);
+		}
+		assert.ok(s.preview!.frame!.avgLum > 0);
+		assert.ok(s.preview!.zoom! > 0, "webview reported its zoom");
+	});
+
+	test("zooming in renders at a higher scale (sharp, not CSS-scaled)", async () => {
+		const before = (await state()).preview!.frame!;
+		await previewCommand({ type: "zoom", zoom: 2 });
+		const s = await waitFor("frame at higher scale", (s) => (s.preview?.frame?.scale ?? 0) >= 2 * before.scale - 0.01, 30000);
+		assert.strictEqual(s.preview!.frame!.width, Math.round(s.preview!.frame!.logicalWidth * s.preview!.frame!.scale));
+		assert.strictEqual(s.preview!.zoom, 2);
+		await checkpoint("zoom-200");
+	});
+
+	test("Fit Width and Fit All", async () => {
+		await previewCommand({ type: "zoom", zoom: "fitWidth" });
+		const fitsWidth = (s: State) =>
+			!!s.preview?.stage && !!s.preview.frame && Math.abs(s.preview.frame.logicalWidth * s.preview.zoom! - s.preview.stage.width) <= 2;
+		let s = await waitFor("fit width", fitsWidth, 10000);
+		const f = s.preview!.frame!;
+		await previewCommand({ type: "zoom", zoom: "fitAll" });
+		s = await waitFor("fit all", (s) => s.preview!.zoom! * f.logicalHeight <= s.preview!.stage!.height + 2, 10000);
+		const p = s.preview!;
+		assert.ok(f.logicalWidth * p.zoom! <= p.stage!.width + 2 && f.logicalHeight * p.zoom! <= p.stage!.height + 2);
+		assert.ok(Math.abs(f.logicalWidth * p.zoom! - p.stage!.width) <= 2 || Math.abs(f.logicalHeight * p.zoom! - p.stage!.height) <= 2);
+		await checkpoint("fit-all");
+	});
+
+	test("theme switch (Dark / Light / Default) without touching the file", async () => {
+		const text = editor.document.getText();
+		await previewCommand({ type: "setTheme", value: "Dark" });
+		let s = await waitFor("dark frame", (s) => s.preview?.theme === "Dark" && (s.preview?.frame?.avgLum ?? 255) < 110, 30000);
+		await checkpoint("theme-dark");
+		await previewCommand({ type: "setTheme", value: "Light" });
+		s = await waitFor("light frame", (s) => s.preview?.theme === "Light" && (s.preview?.frame?.avgLum ?? 0) > 150, 30000);
+		await previewCommand({ type: "setTheme", value: "Default" });
+		await waitFor("default theme", (s) => s.preview?.theme === "Default", 5000);
+		assert.strictEqual(editor.document.getText(), text, "the document must not change");
+		void s;
+	});
+
+	test("form factors and rotation", async () => {
+		await previewCommand({ type: "setFormFactor", id: "phone", rotated: false });
+		await waitFor("phone size", (s) => s.preview?.frame?.logicalWidth === 390 && s.preview?.frame?.logicalHeight === 844, 30000);
+		await checkpoint("form-factor-phone");
+		await previewCommand({ type: "setFormFactor", id: "phone", rotated: true });
+		await waitFor("rotated phone", (s) => s.preview?.frame?.logicalWidth === 844 && s.preview?.frame?.logicalHeight === 390, 30000);
+		await previewCommand({ type: "setFormFactor", id: "default", rotated: false });
+		const { w, h } = designSize();
+		if (w && h) {
+			await waitFor("design size again", (s) => s.preview?.frame?.logicalWidth === w && s.preview?.frame?.logicalHeight === h, 30000);
+		}
+	});
+
+	test("mouse input is forwarded only when enabled", async () => {
+		const { w, h } = designSize();
+		const x = (w || 400) / 2;
+		const y = (h || 300) / 2;
+		await previewCommand({ type: "setInput", enabled: true });
+		let s = await state();
+		const forwarded = s.preview!.inputsForwarded;
+		const framesBefore = frames(s);
+		await previewCommand({ type: "input", kind: "pointerMoved", x, y, modifiers: [] });
+		s = await waitFor("input forwarded", (s) => s.preview!.inputsForwarded === forwarded + 1, 5000);
+		if (editor.document.getText().includes("<TextBox")) {
+			// hovering the centered TextBox of the template changes its border: a new frame arrives
+			await waitFor("hover frame", (s) => frames(s) > framesBefore, 10000);
+		}
+		await previewCommand({ type: "setInput", enabled: false });
+		await previewCommand({ type: "input", kind: "pointerMoved", x: x + 5, y, modifiers: [] });
+		await sleep(500);
+		assert.strictEqual((await state()).preview!.inputsForwarded, forwarded + 1, "input must not be forwarded when disabled");
+		await previewCommand({ type: "setInput", enabled: true });
+	});
+
+	test("FPS limit caps animation frames", async () => {
+		await showMain();
+		const config = vscode.workspace.getConfiguration("avalonia.previewer");
+		const original = editor.document.getText();
+		// an indeterminate progress bar animates continuously
+		const animated = original.substring(0, original.indexOf(">", original.indexOf("<Window")) + 1) +
+			`<ProgressBar IsIndeterminate="True" Width="300"/></Window>`;
+		try {
+			await config.update("fpsLimit", 4, vscode.ConfigurationTarget.Global);
+			await editor.edit((e) => e.replace(new vscode.Range(editor.document.positionAt(0), editor.document.positionAt(original.length)), animated));
+			await sleep(1500);
+			let s = await state();
+			const f0 = frames(s);
+			await sleep(3000);
+			s = await state();
+			const limited = frames(s) - f0;
+			console.log(`[e2e] frames in 3s at fpsLimit=4: ${limited}`);
+			assert.ok(limited >= 3 && limited <= 4 * 3 + 2, `limited frames: ${limited}`);
+			await config.update("fpsLimit", 0, vscode.ConfigurationTarget.Global);
+			await sleep(1000);
+			const f1 = frames(await state());
+			await sleep(3000);
+			const unlimited = frames(await state()) - f1;
+			console.log(`[e2e] frames in 3s unlimited: ${unlimited}`);
+			assert.ok(unlimited > limited * 2, `unlimited ${unlimited} vs limited ${limited}`);
+		} finally {
+			await config.update("fpsLimit", undefined, vscode.ConfigurationTarget.Global);
+			await editor.edit((e) => e.replace(new vscode.Range(editor.document.positionAt(0), editor.document.positionAt(editor.document.getText().length)), original));
+			await editor.document.save();
+		}
+	});
 
 	test("live update of unsaved edits", async () => {
 		await showMain();
@@ -303,6 +437,133 @@ suite("Avalonia previewer (e2e)", () => {
 		}
 	});
 
+	test("Show Code-behind and Show ViewModel", async () => {
+		await showMain();
+		await vscode.commands.executeCommand("avalonia.showCodeBehind");
+		let active = vscode.window.activeTextEditor!;
+		assert.ok(/MainWindow\.axaml\.(cs|fs)$/.test(active.document.fileName), `code-behind: ${active.document.fileName}`);
+		await showMain();
+		await vscode.commands.executeCommand("avalonia.showViewModel");
+		active = vscode.window.activeTextEditor!;
+		const line = active.document.lineAt(active.selection.active.line).text;
+		console.log(`[e2e] view model: ${path.basename(active.document.fileName)}: ${line.trim()}`);
+		assert.ok(/\b(class|type|record)\s+Main(Window)?ViewModel\b/.test(line), `view model declaration: ${line}`);
+		await showMain();
+	});
+
+	test("Format Document uses the AXAML formatter and its settings", async () => {
+		await showMain();
+		const config = vscode.workspace.getConfiguration("avalonia.formatting");
+		const original = editor.document.getText();
+		try {
+			await config.update("attributeWrapThreshold", 1, vscode.ConfigurationTarget.Global);
+			// mess up indentation
+			await editor.edit((e) => e.replace(new vscode.Range(editor.document.positionAt(0), editor.document.positionAt(original.length)), original.replace(/^\s+/gm, "")));
+			const edits = await vscode.commands.executeCommand<vscode.TextEdit[]>("vscode.executeFormatDocumentProvider", editor.document.uri, { tabSize: 4, insertSpaces: true });
+			assert.ok(edits && edits.length > 0, "no formatting edits");
+			const we = new vscode.WorkspaceEdit();
+			we.set(editor.document.uri, edits);
+			await vscode.workspace.applyEdit(we);
+			const formatted = editor.document.getText();
+			assert.match(formatted, /\n    <[A-Za-z]/, "children indented");
+			assert.match(formatted, /<Window xmlns="[^"]+"\r?\n\s+xmlns:/, "attributes wrapped over the threshold");
+			const again = await vscode.commands.executeCommand<vscode.TextEdit[]>("vscode.executeFormatDocumentProvider", editor.document.uri, { tabSize: 4, insertSpaces: true });
+			assert.ok(!again || again.length === 0 || again.every((e) => editor.document.getText(e.range) === e.newText), "formatting is idempotent");
+		} finally {
+			await config.update("attributeWrapThreshold", undefined, vscode.ConfigurationTarget.Global);
+			await editor.edit((e) => e.replace(new vscode.Range(editor.document.positionAt(0), editor.document.positionAt(editor.document.getText().length)), original));
+			await editor.document.save();
+		}
+	});
+
+	test("attribute quote style for completions", async () => {
+		const config = vscode.workspace.getConfiguration("avalonia.editor");
+		try {
+			await config.update("attributeQuoteStyle", "single", vscode.ConfigurationTarget.Global);
+			await showMain();
+			const pos = editor.document.positionAt(editor.document.getText().lastIndexOf("</Window>"));
+			await editor.edit((e) => e.insert(pos, "<Button "));
+			const at = pos.translate(0, "<Button ".length);
+			const list = await vscode.commands.executeCommand<vscode.CompletionList>("vscode.executeCompletionItemProvider", editor.document.uri, at);
+			const texts = list.items.map((i) => (i.textEdit as vscode.TextEdit | undefined)?.newText ?? (typeof i.insertText === "string" ? i.insertText : i.insertText?.value ?? ""));
+			const withQuotes = texts.filter((t) => /=['"]/.test(t));
+			console.log(`[e2e] attribute completions: ${withQuotes.slice(0, 3).join(" | ")}`);
+			assert.ok(withQuotes.length > 0, "no attribute completions");
+			assert.ok(withQuotes.every((t) => t.includes("=''")), "single quotes expected");
+			await vscode.commands.executeCommand("undo");
+		} finally {
+			await config.update("attributeQuoteStyle", undefined, vscode.ConfigurationTarget.Global);
+		}
+	});
+
+	test("🎨 style badges on elements matched by a Style in the file", async () => {
+		await showMain();
+		const text = editor.document.getText();
+		const insertAt = editor.document.positionAt(text.indexOf(">", text.indexOf("<Window")) + 1);
+		const root = /<(\w+)/.exec(text.substring(text.indexOf("<Window")))![1];
+		await editor.edit((e) => e.insert(insertAt, `\n    <${root}.Styles><Style Selector="TextBox, TextBlock, ContentControl"/></${root}.Styles>`));
+		try {
+			const s = await waitFor("badges", (s) => (s.styleBadges ?? 0) >= 1, 10000);
+			console.log(`[e2e] style badges: ${s.styleBadges}`);
+			await checkpoint("style-badges");
+		} finally {
+			await vscode.commands.executeCommand("undo");
+			await editor.document.save();
+		}
+		await waitFor("badges cleared", (s) => (s.styleBadges ?? 0) === 0, 10000);
+	});
+
+	test("Install / update Avalonia templates", async () => {
+		const ok = await vscode.commands.executeCommand<boolean>("avalonia.installTemplates");
+		assert.strictEqual(ok, true);
+	});
+
+	test("Run and Debug the project", async () => {
+		for (const debug of [false, true]) {
+			const started = new Promise<vscode.DebugSession>((resolve) => {
+				const d = vscode.debug.onDidStartDebugSession((s) => {
+					d.dispose();
+					resolve(s);
+				});
+			});
+			const ok = await vscode.commands.executeCommand<boolean>("avalonia.runProject", { debug });
+			assert.strictEqual(ok, true, `runProject debug=${debug}`);
+			const session = await Promise.race([started, sleep(120000).then(() => undefined)]);
+			assert.ok(session, `no debug session (debug=${debug})`);
+			assert.strictEqual(!!session!.configuration.noDebug, !debug);
+			await sleep(3000);
+			await checkpoint(debug ? "debugging" : "running");
+			await vscode.debug.stopDebugging(session);
+			await sleep(1500);
+		}
+	});
+
+	test("previewer host from the launch configuration", async () => {
+		const before = await state();
+		const launchDir = path.join(workspace, ".vscode");
+		const launchFile = path.join(launchDir, "launch.json");
+		const hadLaunch = fs.existsSync(launchFile) ? fs.readFileSync(launchFile, "utf8") : undefined;
+		const config = vscode.workspace.getConfiguration("avalonia.previewer");
+		try {
+			const target = (await vscode.commands.executeCommand<{ targetPath: string }>("avalonia.debug.hostInfo"))!.targetPath;
+			fs.mkdirSync(launchDir, { recursive: true });
+			fs.writeFileSync(launchFile, JSON.stringify({ version: "0.2.0", configurations: [{ name: "e2e", type: "coreclr", request: "launch", program: target }] }, null, 2));
+			await config.update("syncWithLaunchConfig", true, vscode.ConfigurationTarget.Workspace);
+			const s = await waitFor("restart with launch host", (s) => s.sessionsStarted > before.sessionsStarted && s.sessionState === "ready", 120000);
+			const info = await vscode.commands.executeCommand<{ source: string }>("avalonia.debug.hostInfo");
+			assert.strictEqual(info!.source, "launch.json");
+			assert.strictEqual(s.project, before.project);
+		} finally {
+			await config.update("syncWithLaunchConfig", undefined, vscode.ConfigurationTarget.Workspace);
+			if (hadLaunch === undefined) {
+				fs.rmSync(launchFile, { force: true });
+			} else {
+				fs.writeFileSync(launchFile, hadLaunch);
+			}
+			await waitFor("ready again", (s) => s.sessionState === "ready", 120000);
+		}
+	});
+
 	test("Restart command", async () => {
 		const started = (await state()).sessionsStarted;
 		await vscode.commands.executeCommand("avalonia.restartPreviewer");
@@ -320,7 +581,8 @@ suite("Avalonia previewer (e2e)", () => {
 	});
 
 	test("closing the preview stops the previewer", async () => {
-		const url = (await state()).htmlUrl!;
+		const pid = (await state()).previewerPid!;
+		assert.ok(pid, "previewer pid");
 		for (const group of vscode.window.tabGroups.all) {
 			for (const tab of group.tabs) {
 				if ((tab.input as any)?.viewType?.endsWith("avaloniaPreviewer")) {
@@ -330,10 +592,27 @@ suite("Avalonia previewer (e2e)", () => {
 		}
 		await waitFor("panel closed", (s) => !s.panel && !s.sessionState, 10000);
 		await sleep(2000);
-		const alive = await new Promise<boolean>((resolve) =>
-			http.get(url, (r) => { r.resume(); resolve(true); }).on("error", () => resolve(false))
-		);
-		assert.strictEqual(alive, false, "previewer HTTP server still alive after closing the panel");
+		let alive = true;
+		try {
+			process.kill(pid, 0);
+		} catch {
+			alive = false;
+		}
+		assert.strictEqual(alive, false, "previewer process still running after closing the panel");
 		await checkpoint("closed");
+	});
+
+	test("auto-open preview when an AXAML file is opened", async () => {
+		const config = vscode.workspace.getConfiguration("avalonia.previewer");
+		try {
+			await config.update("autoOpen", true, vscode.ConfigurationTarget.Global);
+			await vscode.commands.executeCommand("workbench.action.closeAllEditors");
+			await sleep(500);
+			await showMain();
+			await waitFor("auto-opened preview", (s) => s.panel && s.sessionState === "ready", 120000);
+			await checkpoint("auto-open");
+		} finally {
+			await config.update("autoOpen", undefined, vscode.ConfigurationTarget.Global);
+		}
 	});
 });

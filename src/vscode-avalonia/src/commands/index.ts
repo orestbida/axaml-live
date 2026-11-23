@@ -4,6 +4,7 @@ import { RestartPreviewerCommand, ShowPreviewToSideCommand } from "./ShowPreview
 import { CreatePreviewerAssets, SelectPreviewerHostCommand, SelectSolutionCommand } from "./createPreviewerAssets";
 import { CreateNewProject } from "./createNewProject";
 import { NewItemCommand } from "./newItem";
+import { InstallTemplatesCommand, RunProjectCommand, ShowCodeBehindCommand, ShowViewModelCommand } from "./editorCommands";
 import { PreviewController } from "../services/previewController";
 
 export function registerAvaloniaCommands(
@@ -12,6 +13,10 @@ export function registerAvaloniaCommands(
 ): vscode.Disposable {
 	commandManager.register(new CreateNewProject());
 	commandManager.register(new NewItemCommand());
+	commandManager.register(new ShowCodeBehindCommand());
+	commandManager.register(new ShowViewModelCommand());
+	commandManager.register(new RunProjectCommand());
+	commandManager.register(new InstallTemplatesCommand());
 	commandManager.register(new ShowPreviewToSideCommand(controller));
 	commandManager.register(new RestartPreviewerCommand(controller));
 	commandManager.register(new CreatePreviewerAssets(controller));

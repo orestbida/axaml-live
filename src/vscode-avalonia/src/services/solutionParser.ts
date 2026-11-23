@@ -6,6 +6,7 @@ import * as vscode from "vscode";
 import * as sln from "../models/solutionModel";
 import { AppConstants, logger, samePath, isUnder } from "../util/Utilities";
 import { getDotnetRuntimePath } from "../runtimeManager";
+import { projectFromLaunchConfigurations } from "./launchConfig";
 
 let _context: vscode.ExtensionContext;
 let _model: sln.Solution | undefined;
@@ -167,13 +168,27 @@ export function getExecutableProject(solution: sln.Solution, file?: sln.File): s
 	// explicit choice (#207, #200, #171): e.g. a test/host project for plugin libraries that no executable references
 	const preferred = getPreferredHost();
 	if (preferred) {
-		const host = exes.find((p) => p.name === preferred || samePath(p.path, preferred));
+		const host = exes.find((p) => p.name === preferred.name || samePath(p.path, preferred.name));
 		if (host) {
+			lastHostSource = preferred.source;
 			return host;
 		}
-		logger.warn(`Previewer host project "${preferred}" not found among executable projects; using automatic selection.`);
+		logger.warn(`Previewer host project "${preferred.name}" not found among executable projects; using automatic selection.`);
 	}
 
+	// the project started by the launch configuration (opt-in)
+	if (vscode.workspace.getConfiguration("avalonia.previewer").get<boolean>("syncWithLaunchConfig", false)) {
+		for (const folder of vscode.workspace.workspaceFolders ?? []) {
+			const configs = vscode.workspace.getConfiguration("launch", folder.uri).get<any[]>("configurations", []);
+			const host = projectFromLaunchConfigurations(configs, exes, folder.uri.fsPath);
+			if (host) {
+				lastHostSource = "launch.json";
+				return host;
+			}
+		}
+	}
+
+	lastHostSource = "automatic";
 	const withDesigner = exes.filter((p) => p.designerHostPath);
 	const candidates = withDesigner.length ? withDesigner : exes;
 
@@ -190,14 +205,17 @@ export function getExecutableProject(solution: sln.Solution, file?: sln.File): s
 	return candidates.find((p) => /desktop/i.test(p.name)) ?? candidates[0];
 }
 
+/** How the last host project was chosen: picked, setting, launch.json or automatic. */
+export let lastHostSource = "automatic";
+
 /** Host chosen with "Select previewer host project" (workspace) or the `avalonia.previewer.hostProject` setting. */
-function getPreferredHost(): string | undefined {
+function getPreferredHost(): { name: string; source: string } | undefined {
 	const picked = _context?.workspaceState.get<string>(AppConstants.previewerHost);
 	if (picked) {
-		return picked;
+		return { name: picked, source: "picked" };
 	}
 	const setting = vscode.workspace.getConfiguration("avalonia.previewer").get<string>("hostProject", "").trim();
-	return setting || undefined;
+	return setting ? { name: setting, source: "setting" } : undefined;
 }
 
 /** Lets the user pick the executable project that hosts the previewer; "Automatic" clears the choice. */
@@ -208,7 +226,7 @@ export async function selectPreviewerHost(): Promise<boolean> {
 		vscode.window.showInformationMessage("No executable projects (OutputType WinExe/Exe) found.");
 		return false;
 	}
-	const current = getPreferredHost();
+	const current = getPreferredHost()?.name;
 	const items = [
 		{ label: "Automatic", description: "project that references the file, Desktop head preferred", value: "" },
 		...exes.map((p) => ({

@@ -14,13 +14,124 @@ export class Messages {
 	public static readonly clientSupportedPixelFormats = "63481025701643FEBADCF2FD0F88609E";
 	public static readonly updateXaml = "9AEC9A2E63154066B4BAE9A9EFD0F8CC";
 
+	public static readonly frame = "F58313EEFE694536819DF52EDF201A0E";
+	public static readonly frameReceived = "68014F8A289D48518D345367EDA7F827";
+	public static readonly pointerMoved = "6228F0B999F24F62A621414DA2881648";
+	public static readonly pointerPressed = "7E9E2818F93F411A800E6B1AEB11DA46";
+	public static readonly pointerReleased = "4ADC84EEE7C84BCF986CDE3A2F78EDE4";
+	public static readonly scroll = "79301A05F02D4B90BB39472563B504AE";
+	public static readonly key = "1C3B691E3D544237BFB09FEA83BC1DB8";
+	public static readonly textInput = "C174102E37054594916FB10B8248A17D";
+
 	public static clientSupportedPixelFormatsMessage(): Buffer {
-		return createMessage(Messages.clientSupportedPixelFormats, { formats: [1] });
+		return createMessage(Messages.clientSupportedPixelFormats, { Formats: [PixelFormat.Rgba8888] });
+	}
+
+	/** Render scaling as DPI. Must be BSON doubles: the designer's BSON reader fails on int32 here. */
+	public static clientRenderInfoMessage(scale: number): Buffer {
+		const dpi = new BSON.Double(96 * scale);
+		return createMessage(Messages.clientRenderInfo, { DpiX: dpi, DpiY: dpi });
+	}
+
+	public static frameReceivedMessage(sequenceId: number | bigint | BSON.Long): Buffer {
+		const id = typeof sequenceId === "number" ? BSON.Long.fromNumber(sequenceId) : typeof sequenceId === "bigint" ? BSON.Long.fromBigInt(sequenceId) : sequenceId;
+		return createMessage(Messages.frameReceived, { SequenceId: id });
+	}
+
+	public static pointerMovedMessage(x: number, y: number, modifiers: InputModifier[]): Buffer {
+		return createMessage(Messages.pointerMoved, { X: new BSON.Double(x), Y: new BSON.Double(y), Modifiers: modifiers });
+	}
+
+	public static pointerPressedMessage(x: number, y: number, button: MouseButton, modifiers: InputModifier[]): Buffer {
+		return createMessage(Messages.pointerPressed, { X: new BSON.Double(x), Y: new BSON.Double(y), Button: button, Modifiers: modifiers });
+	}
+
+	public static pointerReleasedMessage(x: number, y: number, button: MouseButton, modifiers: InputModifier[]): Buffer {
+		return createMessage(Messages.pointerReleased, { X: new BSON.Double(x), Y: new BSON.Double(y), Button: button, Modifiers: modifiers });
+	}
+
+	public static scrollMessage(x: number, y: number, deltaX: number, deltaY: number, modifiers: InputModifier[]): Buffer {
+		return createMessage(Messages.scroll, {
+			X: new BSON.Double(x),
+			Y: new BSON.Double(y),
+			DeltaX: new BSON.Double(deltaX),
+			DeltaY: new BSON.Double(deltaY),
+			Modifiers: modifiers,
+		});
+	}
+
+	public static keyMessage(isDown: boolean, key: number, symbol: string | undefined, modifiers: InputModifier[]): Buffer {
+		return createMessage(Messages.key, { IsDown: isDown, Key: key, PhysicalKey: 0, KeySymbol: symbol ?? null, Modifiers: modifiers });
+	}
+
+	public static textInputMessage(text: string, modifiers: InputModifier[]): Buffer {
+		return createMessage(Messages.textInput, { Text: text, Modifiers: modifiers });
 	}
 
 	public static updateXamlMessage(assemblyPath: string, xaml: string, xamlFileProjectPath?: string): Buffer {
 		return createMessage(Messages.updateXaml, { assemblyPath, xaml, xamlFileProjectPath });
 	}
+}
+
+/** Avalonia.Remote.Protocol enums (values verified by reflection on Avalonia.Remote.Protocol 12.2). */
+export enum PixelFormat {
+	Rgb565 = 0,
+	Rgba8888 = 1,
+	Bgra8888 = 2,
+}
+
+/** Modifiers are sent as an array of these values (not flags). */
+export enum InputModifier {
+	Alt = 0,
+	Control = 1,
+	Shift = 2,
+	Windows = 3,
+	LeftMouseButton = 4,
+	RightMouseButton = 5,
+	MiddleMouseButton = 6,
+}
+
+export enum MouseButton {
+	None = 0,
+	Left = 1,
+	Right = 2,
+	Middle = 3,
+}
+
+const namedKeys: Record<string, number> = {
+	Backspace: 2,
+	Tab: 3,
+	Enter: 6,
+	Escape: 13,
+	" ": 18,
+	PageUp: 19,
+	PageDown: 20,
+	End: 21,
+	Home: 22,
+	ArrowLeft: 23,
+	ArrowUp: 24,
+	ArrowRight: 25,
+	ArrowDown: 26,
+	Insert: 31,
+	Delete: 32,
+};
+
+/** Maps a DOM `KeyboardEvent.key` to Avalonia's Key enum (0 = None). */
+export function mapKey(domKey: string): number {
+	if (domKey in namedKeys) {
+		return namedKeys[domKey];
+	}
+	if (/^[a-zA-Z]$/.test(domKey)) {
+		return 44 + (domKey.toUpperCase().charCodeAt(0) - 65); // A = 44
+	}
+	if (/^[0-9]$/.test(domKey)) {
+		return 34 + Number(domKey); // D0 = 34
+	}
+	const f = /^F([1-9]|1[0-2])$/.exec(domKey);
+	if (f) {
+		return 89 + Number(f[1]); // F1 = 90
+	}
+	return 0;
 }
 
 export interface IncomingMessage {
@@ -49,7 +160,7 @@ export class MessageReader {
 			this._buffer = this._buffer.subarray(20 + length);
 
 			try {
-				result.push({ type, body: BSON.deserialize(bodyBytes) });
+				result.push({ type, body: BSON.deserialize(bodyBytes, { promoteBuffers: true }) });
 			} catch {
 				result.push({ type, body: {} });
 			}

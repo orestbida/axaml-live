@@ -7,6 +7,7 @@ import { logger } from "./util/Utilities";
 import { AppConstants } from "./util/Utilities";
 import { initSolutionService, buildSolutionModel } from "./services/solutionParser";
 import { PreviewController } from "./services/previewController";
+import { registerFormatter, StyleBadges } from "./features/editorFeatures";
 
 let languageClient: lsp.LanguageClient | null = null;
 let controller: PreviewController | undefined;
@@ -17,7 +18,19 @@ export async function activate(context: vscode.ExtensionContext) {
 	controller = new PreviewController(context);
 	context.subscriptions.push(controller);
 	context.subscriptions.push(registerAvaloniaCommands(new CommandManager(), controller));
-	context.subscriptions.push(vscode.commands.registerCommand("avalonia.debug.state", () => controller?.getDebugState()));
+	const badges = new StyleBadges();
+	context.subscriptions.push(badges, registerFormatter());
+	context.subscriptions.push(
+		vscode.commands.registerCommand("avalonia.debug.state", () => ({ ...controller?.getDebugState(), styleBadges: badges.count }))
+	);
+	context.subscriptions.push(vscode.commands.registerCommand("avalonia.debug.hostInfo", () => controller?.getHostInfo()));
+
+	// auto-open the previewer for an .axaml editor that is already active at startup
+	const active = vscode.window.activeTextEditor?.document;
+	if (active && /\.axaml$/i.test(active.fileName) && vscode.workspace.getConfiguration("avalonia.previewer").get<boolean>("autoOpen", false)) {
+		controller.show(active.uri);
+	}
+	context.subscriptions.push(vscode.commands.registerCommand("avalonia.debug.previewCommand", (msg) => controller?.onPanelMessage(msg)));
 
 	if (!vscode.workspace.workspaceFolders) {
 		return;

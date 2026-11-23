@@ -3,6 +3,7 @@ import * as lsp from "vscode-languageclient/node";
 import { getDotnetRuntimePath, getLanguageServerPath } from "./runtimeManager";
 import { avaloniaLanguageId, logger } from "./util/Utilities";
 import { getSolutionDataFile } from "./services/solutionParser";
+import { applyQuoteStyle } from "./features/editorFeatures";
 
 export async function createLanguageService(context: vscode.ExtensionContext): Promise<lsp.LanguageClient> {
 	logger.appendLine("Creating language service");
@@ -25,8 +26,17 @@ export async function createLanguageService(context: vscode.ExtensionContext): P
 			fileEvents: vscode.workspace.createFileSystemWatcher("**/*.axaml"),
 		},
 		middleware: {
-			provideDocumentFormattingEdits: (document, options, token, next) =>
-				next(document, { ...options, insertFinalNewline: true }, token),
+			// attribute quote style (avalonia.editor.attributeQuoteStyle) for completions that write `Prop=""`
+			provideCompletionItem: async (document, position, context, token, next) => {
+				const result = await next(document, position, context, token);
+				const items = Array.isArray(result) ? result : result?.items;
+				items?.forEach((i) => applyQuoteStyle(i, document.uri));
+				return result;
+			},
+			resolveCompletionItem: async (item, token, next) => {
+				const resolved = await next(item, token);
+				return resolved ? applyQuoteStyle(resolved, vscode.window.activeTextEditor?.document.uri) : resolved;
+			},
 		},
 	};
 

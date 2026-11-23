@@ -4,11 +4,11 @@ import * as os from "os";
 import * as path from "path";
 import * as crypto from "crypto";
 import * as fs from "fs-extra";
-import * as portfinder from "portfinder";
 import { ChildProcess, spawn } from "child_process";
 
 import * as sm from "../models/solutionModel";
 import { Messages, MessageReader } from "./messageParser";
+import { FrameRateLimiter } from "./frameStats";
 import { AppConstants, logger, samePath } from "../util/Utilities";
 import { XamlResult, parseXamlError } from "./xamlError";
 
@@ -16,6 +16,16 @@ import { XamlResult, parseXamlError } from "./xamlError";
 export type SessionState = "starting" | "ready" | "exited";
 
 export { XamlResult } from "./xamlError";
+
+/** A rendered frame from the designer (RGBA8888). scale = render DPI / 96. */
+export interface PreviewFrame {
+	sequenceId: number;
+	width: number;
+	height: number;
+	stride: number;
+	scale: number;
+	data: Buffer;
+}
 
 /**
  * One running Avalonia designer host for an executable project.
@@ -38,12 +48,46 @@ export class PreviewSession implements vscode.Disposable {
 	public readonly onDidChangeState = this._onDidChangeState.event;
 	private readonly _onXamlResult = new vscode.EventEmitter<XamlResult>();
 	public readonly onXamlResult = this._onXamlResult.event;
+	private readonly _onFrame = new vscode.EventEmitter<PreviewFrame>();
+	public readonly onFrame = this._onFrame.event;
+	private readonly _limiter: FrameRateLimiter;
+	private _renderScale: number;
 
 	public state: SessionState = "starting";
-	public htmlUrl: string | undefined;
 	public exitReason: string | undefined;
 
-	constructor(public readonly project: sm.Project) {}
+	constructor(public readonly project: sm.Project, fpsLimit = 0, renderScale = 1) {
+		this._limiter = new FrameRateLimiter(fpsLimit);
+		this._renderScale = renderScale;
+	}
+
+	public get pid(): number | undefined {
+		return this._process?.pid;
+	}
+
+	public setFpsLimit(fps: number) {
+		this._limiter.setFps(fps);
+	}
+
+	/** Render scaling (DPI / 96): zooming in renders more pixels instead of stretching the image. */
+	public setRenderScale(scale: number) {
+		if (Math.abs(scale - this._renderScale) < 0.001) {
+			return;
+		}
+		this._renderScale = scale;
+		if (this._sessionStarted && this._socket && !this._socket.destroyed) {
+			this._socket.write(Messages.clientRenderInfoMessage(scale));
+		}
+	}
+
+	/** Sends a pre-built input message (pointer, scroll, key, text). */
+	public sendInput(message: Buffer): boolean {
+		if (!this._sessionStarted || !this._socket || this._socket.destroyed) {
+			return false;
+		}
+		this._socket.write(message);
+		return true;
+	}
 
 	/** Last lines of previewer output, used for error reporting. */
 	public get recentOutput(): string {
@@ -66,7 +110,6 @@ export class PreviewSession implements vscode.Disposable {
 			this._server!.listen(0, AppConstants.localhost, () => resolve());
 		});
 		const bsonPort = (this._server.address() as net.AddressInfo).port;
-		const httpPort = await portfinder.getPortPromise({ port: bsonPort + 1 });
 
 		const args = [
 			"exec",
@@ -79,10 +122,6 @@ export class PreviewSession implements vscode.Disposable {
 			"avalonia-remote",
 			"--transport",
 			`tcp-bson://${AppConstants.localhost}:${bsonPort}/`,
-			"--method",
-			"html",
-			"--html-url",
-			`http://${AppConstants.localhost}:${httpPort}`,
 			inShadow(p.targetPath),
 		];
 
@@ -182,12 +221,12 @@ export class PreviewSession implements vscode.Disposable {
 
 	private onMessage(socket: net.Socket, type: string, body: any) {
 		switch (type) {
-			case Messages.htmlTransportStarted:
-				this.htmlUrl = body.Uri ?? body.uri;
-				this.checkReady();
+			case Messages.frame:
+				this.onFrameMessage(socket, body);
 				break;
 			case Messages.startDesignerSession:
 				socket.write(Messages.clientSupportedPixelFormatsMessage());
+				socket.write(Messages.clientRenderInfoMessage(this._renderScale));
 				this._sessionStarted = true;
 				if (this._pending) {
 					this.updateXaml(this._pending.file, this._pending.text);
@@ -222,8 +261,35 @@ export class PreviewSession implements vscode.Disposable {
 	}
 
 	private checkReady() {
-		if (this.state === "starting" && this.htmlUrl && this._sessionStarted) {
+		if (this.state === "starting" && this._sessionStarted) {
 			this.setState("ready");
+		}
+	}
+
+	private onFrameMessage(socket: net.Socket, body: any) {
+		const sequenceId = Number(body.SequenceId ?? 0);
+		const data: Buffer | undefined = Buffer.isBuffer(body.Data)
+			? body.Data
+			: body.Data?.buffer
+				? Buffer.from(body.Data.buffer)
+				: undefined;
+		if (data && body.Width > 0 && body.Height > 0) {
+			this._onFrame.fire({
+				sequenceId,
+				width: body.Width,
+				height: body.Height,
+				stride: body.Stride,
+				scale: (body.DpiX || 96) / 96,
+				data,
+			});
+		}
+		// the designer sends the next frame only after this acknowledgement: delaying it caps the frame rate
+		const ack = () => !socket.destroyed && socket.write(Messages.frameReceivedMessage(sequenceId));
+		const delay = this._limiter.delay(Date.now());
+		if (delay > 0) {
+			setTimeout(ack, delay);
+		} else {
+			ack();
 		}
 	}
 
@@ -251,7 +317,9 @@ export class PreviewSession implements vscode.Disposable {
 				const src = path.join(outputDir, entry.name);
 				const dst = path.join(dir, entry.name);
 				if (entry.isDirectory() && entry.name === "runtimes") {
-					await fs.symlink(src, dst, process.platform === "win32" ? "junction" : "dir");
+					// link to an immutable cache of this platform's native files: never the project's bin (no locks)
+					const cache = await nativeRuntimesCache(src);
+					await fs.symlink(cache, dst, process.platform === "win32" ? "junction" : "dir");
 				} else {
 					await fs.copy(src, dst, { dereference: true });
 				}
@@ -289,6 +357,7 @@ export class PreviewSession implements vscode.Disposable {
 		}
 		this._onDidChangeState.dispose();
 		this._onXamlResult.dispose();
+		this._onFrame.dispose();
 	}
 }
 
@@ -319,6 +388,70 @@ async function enableDesignTimeFeatures(runtimeConfigPath: string) {
 	} catch (e) {
 		logger.warn(`Could not adjust ${runtimeConfigPath}: ${e}`);
 	}
+}
+
+/** Runtime identifiers whose `runtimes/<rid>` folders the current machine can load, most specific first. */
+export function platformRids(platform = process.platform, arch = process.arch): string[] {
+	const a = arch === "ia32" ? "x86" : arch;
+	switch (platform) {
+		case "win32":
+			return [`win-${a}`, "win"];
+		case "darwin":
+			return [`osx-${a}`, "osx", "unix"];
+		default:
+			return [`linux-${a}`, "linux", "unix"];
+	}
+}
+
+/**
+ * Copies this platform's `runtimes/<rid>` folders once into a cache keyed by their content (names, sizes,
+ * timestamps) and returns it. The cache is never written by builds, so the previewer can keep native libraries
+ * loaded while `dotnet build` updates the project's bin (a link to bin/runtimes locked them). Old caches are
+ * removed after a week; they may be in use by previewers of other VS Code windows.
+ */
+async function nativeRuntimesCache(runtimesDir: string): Promise<string> {
+	const rids = platformRids().filter((rid) => fs.existsSync(path.join(runtimesDir, rid)));
+	const listing: string[] = [];
+	for (const rid of rids) {
+		const walkDir = async (dir: string) => {
+			for (const e of await fs.readdir(dir, { withFileTypes: true })) {
+				const p = path.join(dir, e.name);
+				if (e.isDirectory()) {
+					await walkDir(p);
+				} else {
+					const st = await fs.stat(p);
+					listing.push(`${path.relative(runtimesDir, p)}|${st.size}|${st.mtimeMs}`);
+				}
+			}
+		};
+		await walkDir(path.join(runtimesDir, rid));
+	}
+	const hash = crypto.createHash("sha1").update(listing.sort().join("\n")).digest("hex").substring(0, 16);
+	const root = path.join(os.tmpdir(), "avalonia-previewer", "runtimes");
+	const cache = path.join(root, hash);
+	if (!(await fs.pathExists(cache))) {
+		const tmp = `${cache}.${process.pid}.${Date.now()}`;
+		for (const rid of rids) {
+			await fs.copy(path.join(runtimesDir, rid), path.join(tmp, rid));
+		}
+		await fs.ensureDir(tmp);
+		try {
+			await fs.rename(tmp, cache);
+		} catch {
+			await fs.remove(tmp).catch(() => undefined); // another window created it meanwhile
+		}
+		logger.info(`Cached native runtimes (${rids.join(", ")}) for the previewer.`);
+	}
+	// best effort cleanup of caches unused for a week
+	for (const name of await fs.readdir(root).catch(() => [] as string[])) {
+		const p = path.join(root, name);
+		const st = await fs.stat(p).catch(() => undefined);
+		if (p !== cache && st && Date.now() - st.mtimeMs > 7 * 24 * 3600 * 1000) {
+			await fs.remove(p).catch(() => undefined);
+		}
+	}
+	await fs.utimes(cache, new Date(), new Date()).catch(() => undefined);
+	return cache;
 }
 
 /** Removes a shadow dir. The `runtimes` link is unlinked first so its target is never touched. */

@@ -5,8 +5,6 @@ export const avaloniaFileExtension = "axaml";
 export const avaloniaLanguageId = "axaml";
 export const logger = vscode.window.createOutputChannel("Avalonia Client", { log: true });
 
-const isWindows = process.platform === "win32";
-
 /**
  * Checks if the given document is an Avalonia file.
  */
@@ -18,25 +16,7 @@ export function getFileName(filePath: string): string {
 	return path.basename(filePath);
 }
 
-function normalize(p: string): string {
-	const n = path.normalize(p).replace(/[\\/]+$/, "");
-	return isWindows ? n.toLowerCase() : n;
-}
-
-/** Path equality that ignores drive letter / case differences on Windows. */
-export function samePath(a: string | undefined, b: string | undefined): boolean {
-	if (!a || !b) {
-		return false;
-	}
-	return normalize(a) === normalize(b);
-}
-
-/** True when `child` is located inside `parent` folder. */
-export function isUnder(child: string, parent: string): boolean {
-	const c = normalize(child);
-	const p = normalize(parent);
-	return c.startsWith(p + path.sep);
-}
+export { samePath, isUnder } from "./paths";
 
 /**
  * Various app constants

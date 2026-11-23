@@ -5,9 +5,30 @@ import { spawn } from "child_process";
 
 import * as sm from "../models/solutionModel";
 import * as sln from "./solutionParser";
-import { PreviewSession, canStartPreviewer, isSameProject, XamlResult } from "./previewSession";
-import { WebPreviewerPanel } from "../panels/WebPreviwerPanel";
+import { PreviewSession, PreviewFrame, canStartPreviewer, isSameProject, XamlResult } from "./previewSession";
+import { PanelOptions, WebPreviewerPanel } from "../panels/WebPreviwerPanel";
 import { AppConstants, isAvaloniaFile, logger, samePath } from "../util/Utilities";
+import { Messages, mapKey } from "./messageParser";
+import { averageLuminance } from "./frameStats";
+import { applyDesignSize, applyThemeVariant } from "../xaml/designTransforms";
+import { formFactors, resolveFormFactor } from "../xaml/formFactors";
+
+interface ViewInfo {
+	zoom: number;
+	zoomMode: number | string;
+	renderScale: number;
+	stageWidth: number;
+	stageHeight: number;
+}
+
+interface FrameInfo {
+	width: number;
+	height: number;
+	scale: number;
+	logicalWidth: number;
+	logicalHeight: number;
+	avgLum: number;
+}
 
 /**
  * Owns the preview panel and the previewer session and keeps them in sync with the editor:
@@ -31,12 +52,32 @@ export class PreviewController implements vscode.Disposable {
 	private readonly _disposables: vscode.Disposable[] = [];
 	private readonly _diagnostics = vscode.languages.createDiagnosticCollection("Avalonia Previewer");
 
+	// previewer view options (toolbar) and rendering statistics
+	private _theme: string;
+	private _formFactor: string;
+	private _rotated: boolean;
+	private _inputEnabled: boolean;
+	private _view: ViewInfo | undefined;
+	private _frames = 0;
+	private _frameTimes: number[] = [];
+	private _frameInfo: FrameInfo | undefined;
+	private _inputsForwarded = 0;
+
 	constructor(private readonly _context: vscode.ExtensionContext) {
+		const config = this.config;
+		this._theme = config.get<string>("defaultThemeVariant", "Default");
+		this._formFactor = config.get<string>("defaultFormFactor", "default");
+		this._rotated = config.get<boolean>("defaultFormFactorRotated", false);
+		this._inputEnabled = config.get<boolean>("enableInput", true);
 		this._disposables.push(
 			this._diagnostics,
 			vscode.window.onDidChangeActiveTextEditor((e) => {
-				if (this._panel && e && isAvaloniaFile(e.document)) {
-					this.setFile(e.document.uri);
+				if (e && isAvaloniaFile(e.document)) {
+					if (this._panel) {
+						this.setFile(e.document.uri);
+					} else if (this.config.get<boolean>("autoOpen", false)) {
+						this.show(e.document.uri);
+					}
 				}
 			}),
 			vscode.workspace.onDidChangeTextDocument((e) => {
@@ -46,8 +87,18 @@ export class PreviewController implements vscode.Disposable {
 				}
 			}),
 			vscode.workspace.onDidChangeConfiguration((e) => {
-				if (this._panel && e.affectsConfiguration("avalonia.previewer.hostProject")) {
+				const hostChanged =
+					e.affectsConfiguration("avalonia.previewer.hostProject") ||
+					e.affectsConfiguration("avalonia.previewer.syncWithLaunchConfig") ||
+					(this.config.get<boolean>("syncWithLaunchConfig", false) && e.affectsConfiguration("launch"));
+				if (this._panel && hostChanged) {
 					this.restart();
+				}
+				if (e.affectsConfiguration("avalonia.previewer.fpsLimit")) {
+					this._session?.setFpsLimit(this.fpsLimit);
+				}
+				if (e.affectsConfiguration("avalonia.previewer.maxRenderScale")) {
+					this._panel?.setOptions(this.panelOptions);
 				}
 			}),
 			vscode.workspace.onDidSaveTextDocument((doc) => {
@@ -58,8 +109,26 @@ export class PreviewController implements vscode.Disposable {
 		);
 	}
 
+	private get config() {
+		return vscode.workspace.getConfiguration("avalonia.previewer");
+	}
+
 	private get editDelay(): number {
-		return vscode.workspace.getConfiguration("avalonia.previewer").get<number>("updateDelay", 300);
+		return this.config.get<number>("updateDelay", 300);
+	}
+
+	private get fpsLimit(): number {
+		return Math.max(0, this.config.get<number>("fpsLimit", 30));
+	}
+
+	private get panelOptions(): PanelOptions {
+		return {
+			theme: this._theme,
+			formFactor: this._formFactor,
+			rotated: this._rotated,
+			inputEnabled: this._inputEnabled,
+			maxRenderScale: Math.max(1, this.config.get<number>("maxRenderScale", 3)),
+		};
 	}
 
 	/** Shows the preview panel for the given file. */
@@ -71,17 +140,18 @@ export class PreviewController implements vscode.Disposable {
 		}
 		if (!this._panel) {
 			const column = vscode.window.activeTextEditor ? vscode.ViewColumn.Beside : vscode.ViewColumn.Active;
-			this._panel = new WebPreviewerPanel(this._context.extensionUri, column);
+			this._panel = new WebPreviewerPanel(this._context.extensionUri, column, this.panelOptions);
 			this._panel.onDidDispose(() => this.onPanelClosed());
-			this._panel.onCommand((cmd) => this.onPanelCommand(cmd));
+			this._panel.onMessage((msg) => this.onPanelMessage(msg));
 		} else {
 			this._panel.reveal();
 		}
 		await this.setFile(uri);
 	}
 
-	private onPanelCommand(cmd: string) {
-		switch (cmd) {
+	/** Messages from the preview webview (also used by tests through avalonia.debug.previewCommand). */
+	public onPanelMessage(msg: any) {
+		switch (msg?.type) {
 			case "restart":
 				this.restart();
 				break;
@@ -94,7 +164,109 @@ export class PreviewController implements vscode.Disposable {
 			case "showLog":
 				logger.show(true);
 				break;
+			case "zoom":
+				this._panel?.setZoom(msg.zoom);
+				break;
+			case "view":
+				this._view = msg;
+				this._session?.setRenderScale(msg.renderScale);
+				break;
+			case "setTheme":
+				this._theme = ["Light", "Dark"].includes(msg.value) ? msg.value : "Default";
+				this.optionsChanged();
+				break;
+			case "setFormFactor":
+				this._formFactor = formFactors.some((f) => f.id === msg.id) ? msg.id : "default";
+				this._rotated = !!msg.rotated;
+				this.optionsChanged();
+				break;
+			case "setInput":
+				this._inputEnabled = !!msg.enabled;
+				this._panel?.setOptions(this.panelOptions);
+				break;
+			case "input":
+				this.forwardInput(msg);
+				break;
 		}
+	}
+
+	private _optionsTimer: NodeJS.Timeout | undefined;
+	private _watchdog: NodeJS.Timeout | undefined;
+
+	/** Toolbar changes in quick succession result in one XAML update (each update opens a new design window). */
+	private optionsChanged() {
+		this._panel?.setOptions(this.panelOptions);
+		clearTimeout(this._optionsTimer);
+		this._optionsTimer = setTimeout(() => this.pushXaml(), 50);
+	}
+
+	/**
+	 * If an update produces neither a frame nor a result, send it once more. Back-to-back updates can leave the
+	 * designer's new window waiting for a frame acknowledgement that belonged to the previous window.
+	 */
+	private armWatchdog(framesAtPush: number, retry: boolean) {
+		clearTimeout(this._watchdog);
+		const resultAtPush = this._lastXaml;
+		this._watchdog = setTimeout(() => {
+			if (this._frames === framesAtPush && this._lastXaml === resultAtPush && this._session?.state === "ready" && retry) {
+				logger.debug("No frame after XAML update, sending it again.");
+				this.pushXaml(false);
+			}
+		}, 4000);
+	}
+
+	private forwardInput(msg: any) {
+		if (!this._inputEnabled || !this._session) {
+			return;
+		}
+		const mods: number[] = Array.isArray(msg.modifiers) ? msg.modifiers : [];
+		let message: Buffer | undefined;
+		switch (msg.kind) {
+			case "pointerMoved":
+				message = Messages.pointerMovedMessage(msg.x, msg.y, mods);
+				break;
+			case "pointerPressed":
+				message = Messages.pointerPressedMessage(msg.x, msg.y, msg.button ?? 1, mods);
+				break;
+			case "pointerReleased":
+				message = Messages.pointerReleasedMessage(msg.x, msg.y, msg.button ?? 1, mods);
+				break;
+			case "scroll":
+				message = Messages.scrollMessage(msg.x, msg.y, msg.deltaX ?? 0, msg.deltaY ?? 0, mods);
+				break;
+			case "key":
+				message = Messages.keyMessage(!!msg.isDown, mapKey(String(msg.key ?? "")), msg.key, mods);
+				break;
+			case "text":
+				message = Messages.textInputMessage(String(msg.text ?? ""), mods);
+				break;
+		}
+		if (message && this._session.sendInput(message)) {
+			this._inputsForwarded++;
+		}
+	}
+
+	private onFrame(frame: PreviewFrame) {
+		this._frames++;
+		logger.debug(`Frame ${frame.sequenceId} ${frame.width}x${frame.height} scale=${frame.scale}`);
+		const now = Date.now();
+		this._frameTimes.push(now);
+		this._frameTimes = this._frameTimes.filter((t) => now - t <= 2000);
+		this._frameInfo = {
+			width: frame.width,
+			height: frame.height,
+			scale: frame.scale,
+			logicalWidth: Math.round(frame.width / frame.scale),
+			logicalHeight: Math.round(frame.height / frame.scale),
+			avgLum: Math.round(averageLuminance(frame.data) * 10) / 10,
+		};
+		this._panel?.showFrame({
+			width: frame.width,
+			height: frame.height,
+			stride: frame.stride,
+			scale: frame.scale,
+			data: new Uint8Array(frame.data.buffer, frame.data.byteOffset, frame.data.byteLength),
+		});
 	}
 
 	private onPanelClosed() {
@@ -176,21 +348,18 @@ export class PreviewController implements vscode.Disposable {
 		this._panel?.setXaml({});
 		this._diagnostics.clear();
 		this._panel?.setState({ status: "starting", message: `Starting previewer for ${project.name}…` });
-		const session = new PreviewSession(project);
+		const session = new PreviewSession(project, this.fpsLimit, this._view?.renderScale ?? 1);
 		this._session = session;
 		this.watchOutput(project);
 
+		session.onFrame((f) => this._session === session && this.onFrame(f));
 		session.onDidChangeState((state) => {
 			if (this._session !== session) {
 				return;
 			}
 			if (state === "ready") {
-				// remote / Codespaces / WSL: forward the previewer port to the machine running the UI (#131, #122, #53)
-				vscode.env.asExternalUri(vscode.Uri.parse(session.htmlUrl!)).then((external) => {
-					if (this._session === session && session.state === "ready") {
-						this._panel?.setState({ status: "ready", message: `${project.name} · ${path.basename(this._file?.fsPath ?? "")}`, url: external.toString(true) });
-					}
-				});
+				// frames travel through the extension host, so this also works remotely (SSH, WSL, Codespaces)
+				this._panel?.setState({ status: "ready", message: `${project.name} · ${path.basename(this._file?.fsPath ?? "")}` });
 			} else if (state === "exited") {
 				this.showError(session.exitReason ?? "Previewer stopped.", session.recentOutput);
 			}
@@ -239,7 +408,7 @@ export class PreviewController implements vscode.Disposable {
 		await this.setFile(this._file);
 	}
 
-	private async pushXaml() {
+	private async pushXaml(retryIfStuck = true) {
 		const file = this._file;
 		const session = this._session;
 		if (!file || !session) {
@@ -250,10 +419,19 @@ export class PreviewController implements vscode.Disposable {
 			return;
 		}
 		const doc = vscode.workspace.textDocuments.find((d) => samePath(d.uri.fsPath, file.fsPath));
-		const text = doc ? doc.getText() : await fs.readFile(file.fsPath, "utf-8").catch(() => undefined);
-		if (text !== undefined) {
-			session.updateXaml(details, text);
+		let text = doc ? doc.getText() : await fs.readFile(file.fsPath, "utf-8").catch(() => undefined);
+		if (text === undefined) {
+			return;
 		}
+		// previewer options are applied to the XAML sent to the designer only, never to the document
+		text = applyThemeVariant(text, this._theme);
+		const size = resolveFormFactor(this._formFactor, this._rotated);
+		if (size) {
+			text = applyDesignSize(text, size.width, size.height);
+		}
+		logger.debug(`UpdateXaml ${path.basename(file.fsPath)} theme=${this._theme} size=${size ? `${size.width}x${size.height}` : "design"}`);
+		session.updateXaml(details, text);
+		this.armWatchdog(this._frames, retryIfStuck);
 	}
 
 	private onXamlResult(r: XamlResult) {
@@ -389,6 +567,14 @@ export class PreviewController implements vscode.Disposable {
 		this._panel?.setState({ status: "error", message, details, canBuild });
 	}
 
+	/** The host project for the current file and how it was chosen (avalonia.debug.hostInfo). */
+	public async getHostInfo() {
+		const model = await sln.ensureSolutionModel().catch(() => undefined);
+		const file = model && this._file ? sln.getFileDetails(this._file.fsPath, model) : undefined;
+		const project = model ? sln.getExecutableProject(model, file) : undefined;
+		return project ? { name: project.name, targetPath: project.targetPath, source: sln.lastHostSource } : undefined;
+	}
+
 	/** Internal state for diagnostics and end-to-end tests (command avalonia.debug.state). */
 	public getDebugState() {
 		return {
@@ -397,29 +583,44 @@ export class PreviewController implements vscode.Disposable {
 			panelState: this._panel?.state,
 			sessionState: this._session?.state,
 			project: this._session?.project.name,
-			htmlUrl: this._session?.htmlUrl,
+			previewerPid: this._session?.pid,
 			sessionsStarted: this._restarts,
 			lastXaml: this._lastXaml,
 			building: !!this._building,
+			preview: {
+				frames: this._frames,
+				frame: this._frameInfo,
+				zoom: this._view?.zoom,
+				stage: this._view ? { width: this._view.stageWidth, height: this._view.stageHeight } : undefined,
+				theme: this._theme,
+				formFactor: this._formFactor,
+				rotated: this._rotated,
+				inputEnabled: this._inputEnabled,
+				inputsForwarded: this._inputsForwarded,
+				fpsLimit: this.fpsLimit,
+				recentFps: this._frameTimes.length / 2,
+			},
 		};
 	}
 
 	public dispose() {
 		clearTimeout(this._restartTimer);
 		clearTimeout(this._editTimer);
+		clearTimeout(this._optionsTimer);
+		clearTimeout(this._watchdog);
 		this.stopSession();
 		this._panel?.dispose();
 		this._disposables.forEach((d) => d.dispose());
 	}
 }
 
-interface BuildResult {
+export interface BuildResult {
 	ok: boolean;
 	errors: string;
 	tail: string;
 }
 
-function dotnetBuild(projectPath: string): Promise<BuildResult> {
+export function dotnetBuild(projectPath: string): Promise<BuildResult> {
 	return new Promise((resolve) => {
 		logger.info(`dotnet build "${projectPath}"`);
 		const lines: string[] = [];
