@@ -13,6 +13,8 @@ const workspace = e2eSetting("E2E_WORKSPACE") ?? vscode.workspace.workspaceFolde
 const shotDir = e2eSetting("E2E_SCREENSHOT_DIR");
 const reportFile = e2eSetting("E2E_REPORT");
 const pauseMs = Number(e2eSetting("E2E_PAUSE_MS") ?? 1500);
+const include = e2eSetting("E2E_INCLUDE"); // regex on the workspace-relative path (forward slashes)
+const screenshotAll = e2eSetting("E2E_SCREENSHOT_ALL") === "1";
 
 const state = async () => (await vscode.commands.executeCommand<any>("avalonia.debug.state"))!;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -20,9 +22,15 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 async function waitFor(what: string, pred: (s: any) => boolean, timeout: number): Promise<any> {
 	const end = Date.now() + timeout;
 	let s = await state();
+	let exitedSince: number | undefined;
 	while (!pred(s)) {
 		if (Date.now() > end) {
 			throw new Error(`Timed out waiting for: ${what}`);
+		}
+		// the designer restarts by itself after a crash; give up when it stays down
+		exitedSince = s.sessionState === "exited" ? exitedSince ?? Date.now() : undefined;
+		if (exitedSince && Date.now() - exitedSince > 5000) {
+			throw new Error(`Previewer stopped: ${s.lastCrash ?? s.panelState?.message}`);
 		}
 		await sleep(250);
 		s = await state();
@@ -50,11 +58,13 @@ interface FileReport {
 	previewLine?: number;
 	frame?: { logicalWidth: number; logicalHeight: number; avgLum: number };
 	blank?: boolean;
+	designDataContext?: boolean;
+	crash?: string;
 	diagnostics: string[];
 }
 
 suite("All AXAML files (read-only)", () => {
-	const files = axamlFiles(workspace);
+	const files = axamlFiles(workspace).filter((f) => !include || new RegExp(include).test(path.relative(workspace, f).split(path.sep).join("/")));
 	const report: FileReport[] = [];
 	let first = true;
 
@@ -65,7 +75,9 @@ suite("All AXAML files (read-only)", () => {
 		for (const r of report) {
 			console.log(`[report] ${r.ok ? "OK  " : "FAIL"} ${r.file}` +
 				(r.frame ? ` ${r.frame.logicalWidth}x${r.frame.logicalHeight} lum=${r.frame.avgLum}${r.blank ? " (blank)" : ""}` : " (no frame)") +
+				(r.designDataContext ? " [design data]" : "") +
 				(r.previewError ? ` | preview: ${r.previewError}` : "") +
+				(r.crash ? ` | ${r.crash}` : "") +
 				(r.diagnostics.length ? ` | diagnostics: ${r.diagnostics.join(" ; ")}` : ""));
 		}
 	});
@@ -73,6 +85,7 @@ suite("All AXAML files (read-only)", () => {
 	for (const file of files) {
 		const rel = path.relative(workspace, file);
 		test(`preview ${rel}`, async () => {
+			const wasFirst = first;
 			const doc = await vscode.workspace.openTextDocument(file);
 			const text = doc.getText();
 			await vscode.window.showTextDocument(doc, vscode.ViewColumn.One);
@@ -84,7 +97,7 @@ suite("All AXAML files (read-only)", () => {
 			const s = await waitFor(
 				"XAML result for this file",
 				(s) => s.sessionState === "ready" && s.file?.toLowerCase() === file.toLowerCase() && s.xamlResults > (before.xamlResults ?? 0),
-				240000
+				wasFirst ? 240000 : 60000
 			);
 			await sleep(pauseMs); // frames settle, language server analyzes
 			const after = await state();
@@ -98,8 +111,20 @@ suite("All AXAML files (read-only)", () => {
 				frame: frame && { logicalWidth: frame.logicalWidth, logicalHeight: frame.logicalHeight, avgLum: frame.avgLum },
 				diagnostics: diags.map((d) => `${d.source} ${d.range.start.line + 1}: ${d.message}`),
 			};
+			r.designDataContext = !!after.designDataContext;
+			if ((after.crashes ?? 0) > (before.crashes ?? 0)) {
+				// the designer crashed (user code at design time, e.g. OnLoaded); the crash can surface while the next
+				// file loads, so blame the file named in the crash when there is one
+				const named = [r, ...report].find((x) => after.lastCrash?.includes(` in ${path.basename(x.file, ".axaml")}.`)) ?? r;
+				named.crash = after.lastCrash;
+				named.ok = false;
+			}
+			r.blank = !!frame && (frame.logicalWidth < 2 || frame.logicalHeight < 2);
+			if (frame && frame.avgLum < 5) {
+				console.log(`[trace] ${rel} rendered black:\n  ${(after.trace ?? []).join("\n  ")}\n  -- session:\n  ${(after.sessionTrace ?? []).join("\n  ")}`);
+			}
 			report.push(r);
-			if (shotDir) {
+			if (shotDir && (screenshotAll || !r.ok || r.blank)) {
 				windowsScreenshot(shotDir, `${String(report.length).padStart(2, "0")}-${path.basename(file)}.png`);
 			}
 			assert.strictEqual(doc.getText(), text, "the file must not be modified");
@@ -108,6 +133,6 @@ suite("All AXAML files (read-only)", () => {
 
 	test("all files preview without errors", () => {
 		const failed = report.filter((r) => !r.ok);
-		assert.strictEqual(failed.length, 0, failed.map((f) => `${f.file}: ${f.previewError ?? f.diagnostics.join("; ")}`).join("\n"));
+		assert.strictEqual(failed.length, 0, failed.map((f) => `${f.file}: ${f.crash ?? f.previewError ?? f.diagnostics.join("; ")}`).join("\n"));
 	});
 });

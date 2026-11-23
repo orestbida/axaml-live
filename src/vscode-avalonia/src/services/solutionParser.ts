@@ -1,6 +1,7 @@
 import * as fs from "fs-extra";
 import * as path from "path";
 import { spawn } from "child_process";
+import { parseSolutionParserOutput } from "./parserOutput";
 import * as vscode from "vscode";
 
 import * as sln from "../models/solutionModel";
@@ -120,13 +121,13 @@ async function parseSolution(): Promise<sln.Solution | undefined> {
 		});
 	});
 
-	const model = JSON.parse(json) as sln.Solution;
+	const model = parseSolutionParserOutput(json) as sln.Solution;
 	_model = model;
 	await _context.workspaceState.update(AppConstants.solutionData, model);
 
 	const dataFile = getSolutionDataFile();
 	await fs.ensureDir(path.dirname(dataFile));
-	await fs.writeFile(dataFile, json, "utf-8");
+	await fs.writeFile(dataFile, JSON.stringify(model, null, 2), "utf-8");
 
 	logger.info(`Solution parsed: ${model.projects.length} project(s), ${model.files.length} XAML file(s)`);
 	return model;

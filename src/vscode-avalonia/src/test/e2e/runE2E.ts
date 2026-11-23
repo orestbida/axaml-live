@@ -13,9 +13,26 @@
  */
 import * as path from "path";
 import * as os from "os";
+import * as fs from "fs";
 import { runTests } from "@vscode/test-electron";
 
+/** Test windows open maximized so the run is easy to watch (E2E_MAXIMIZED=0 to disable). */
+function prepareUserSettings(userDataDir: string) {
+	const file = path.join(userDataDir, "User", "settings.json");
+	let settings: Record<string, unknown> = {};
+	try {
+		settings = JSON.parse(fs.readFileSync(file, "utf8"));
+	} catch {
+		/* new profile */
+	}
+	settings["window.newWindowDimensions"] = process.env.E2E_MAXIMIZED === "0" ? "default" : "maximized";
+	fs.mkdirSync(path.dirname(file), { recursive: true });
+	fs.writeFileSync(file, JSON.stringify(settings, null, 2));
+}
+
 async function main() {
+	const userDataDir = process.env.E2E_USER_DATA_DIR ?? path.join(os.tmpdir(), "avalonia-vscode-e2e-run");
+	prepareUserSettings(userDataDir);
 	const remote = process.env.E2E_REMOTE;
 	const vscodeExecutablePath = process.argv[3];
 
@@ -56,11 +73,13 @@ async function main() {
 				E2E_GREP: process.env.E2E_GREP,
 				E2E_SUITE: process.env.E2E_SUITE,
 				E2E_REPORT: process.env.E2E_REPORT,
+				E2E_INCLUDE: process.env.E2E_INCLUDE,
+				E2E_SCREENSHOT_ALL: process.env.E2E_SCREENSHOT_ALL,
 			},
 			launchArgs: [
 				...workspaceArgs,
 				"--user-data-dir",
-				process.env.E2E_USER_DATA_DIR ?? path.join(os.tmpdir(), "avalonia-vscode-e2e-run"),
+				userDataDir,
 				// the official (closed source) extension contributes the same commands
 				"--disable-extension",
 				"AvaloniaTeam.vscode-avalonia",

@@ -5,6 +5,11 @@ import * as vscode from "vscode";
 import { execFile } from "child_process";
 import { e2eSetting, windowsScreenshot } from "./config";
 
+/** Logical frame size, within a pixel: at fractional render scales the designer rounds the bitmap size. */
+const samePathLike = (a: string, b: string) => a.toLowerCase().replace(/\\/g, "/") === b.toLowerCase().replace(/\\/g, "/");
+const sizeIs = (s: any, w: number, h: number) =>
+	!!s.preview?.frame && Math.abs(s.preview.frame.logicalWidth - w) <= 1 && Math.abs(s.preview.frame.logicalHeight - h) <= 1;
+
 const workspace = e2eSetting("E2E_WORKSPACE") ?? vscode.workspace.workspaceFolders![0].uri.fsPath;
 const shotDir = e2eSetting("E2E_SCREENSHOT_DIR");
 const pauseMs = Number(e2eSetting("E2E_PAUSE_MS") ?? 2500);
@@ -14,6 +19,11 @@ type State = {
 	panel: boolean;
 	panelState?: { status: string; message?: string; url?: string };
 	sessionState?: string;
+	designDataContext?: boolean;
+	xamlResults?: number;
+	file?: string;
+	crashes?: number;
+	lastCrash?: string;
 	project?: string;
 	htmlUrl?: string;
 	sessionsStarted: number;
@@ -164,14 +174,14 @@ suite("Avalonia previewer (e2e)", () => {
 
 	test("form factors and rotation", async () => {
 		await previewCommand({ type: "setFormFactor", id: "phone", rotated: false });
-		await waitFor("phone size", (s) => s.preview?.frame?.logicalWidth === 390 && s.preview?.frame?.logicalHeight === 844, 30000);
+		await waitFor("phone size", (s) => sizeIs(s, 390, 844), 30000);
 		await checkpoint("form-factor-phone");
 		await previewCommand({ type: "setFormFactor", id: "phone", rotated: true });
-		await waitFor("rotated phone", (s) => s.preview?.frame?.logicalWidth === 844 && s.preview?.frame?.logicalHeight === 390, 30000);
+		await waitFor("rotated phone", (s) => sizeIs(s, 844, 390), 30000);
 		await previewCommand({ type: "setFormFactor", id: "default", rotated: false });
 		const { w, h } = designSize();
 		if (w && h) {
-			await waitFor("design size again", (s) => s.preview?.frame?.logicalWidth === w && s.preview?.frame?.logicalHeight === h, 30000);
+			await waitFor("design size again", (s) => sizeIs(s, w, h), 30000);
 		}
 	});
 
@@ -228,6 +238,36 @@ suite("Avalonia previewer (e2e)", () => {
 		}
 	});
 
+	test("design data context: a type without a public constructor falls back, later previews stay correct", async () => {
+		await showMain();
+		const main = await waitFor("main frame", (s) => (s.preview?.frame?.avgLum ?? 0) > 50, 30000);
+		const mainLum = main.preview!.frame!.avgLum;
+		// KeyGesture has no parameterless constructor: the automatic Design.DataContext fails at load time
+		const file = path.join(path.dirname(mainWindow), "E2eNoCtor.axaml");
+		fs.writeFileSync(file, `<UserControl xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" x:DataType="KeyGesture" Width="300" Height="120"><TextBlock Text="no constructor" FontSize="24"/></UserControl>`);
+		try {
+			const before = await state();
+			await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(file), vscode.ViewColumn.One);
+			let s = await waitFor("no-ctor view", (s) => sizeIs(s, 300, 120) && (s.xamlResults ?? 0) > (before.xamlResults ?? 0), 30000);
+			await sleep(1000);
+			s = await state();
+			assert.ok(!s.lastXaml?.error && !s.lastXaml?.message, `preview error shown: ${JSON.stringify(s.lastXaml)}`);
+			assert.ok(!s.designDataContext, "fell back to the XAML without the design data context");
+			assert.ok(s.preview!.frame!.avgLum > 50, `no-ctor view rendered black: ${JSON.stringify(s.preview?.frame)}`);
+			// the next file renders normally
+			await showMain();
+			s = await waitFor("main frame again", (s) => !!s.file && samePathLike(s.file, mainWindow) && !sizeIs(s, 300, 120), 30000);
+			await sleep(1000);
+			s = await state();
+			assert.ok(Math.abs(s.preview!.frame!.avgLum - mainLum) < 30, `main window renders differently after the fallback: ${s.preview!.frame!.avgLum} vs ${mainLum}`);
+		} finally {
+			await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(file), vscode.ViewColumn.One);
+			await vscode.commands.executeCommand("workbench.action.closeActiveEditor");
+			fs.rmSync(file, { force: true });
+			await showMain();
+		}
+	});
+
 	test("form factor, theme and edits apply while an animation runs (no reload needed)", async () => {
 		await showMain();
 		const original = editor.document.getText();
@@ -241,10 +281,12 @@ suite("Avalonia previewer (e2e)", () => {
 			await sleep(1500); // frames of the animated window are flowing, acknowledgements in flight
 			for (const ff of [{ id: "phone", w: 390, h: 844 }, { id: "tablet", w: 768, h: 1024 }]) {
 				await previewCommand({ type: "setFormFactor", id: ff.id, rotated: false });
-				await waitFor(`${ff.id} size while animating`, (s) => s.preview?.frame?.logicalWidth === ff.w && s.preview?.frame?.logicalHeight === ff.h, 15000);
+				await waitFor(`${ff.id} size while animating`, (s) => sizeIs(s, ff.w, ff.h), 15000);
 				const f0 = frames(await state());
 				await sleep(1000);
-				assert.ok(frames(await state()) > f0 + 5, `animation stopped after switching to ${ff.id}`);
+				const s1 = await state();
+				console.log(`[e2e] ${ff.id} ${s1.preview?.frame?.width}x${s1.preview?.frame?.height} px: ${frames(s1) - f0} frames/s`);
+				assert.ok(frames(s1) > f0 + 5, `animation stopped after switching to ${ff.id}: ${frames(s1) - f0} frames/s ${JSON.stringify({ frame: s1.preview?.frame, fps: s1.preview?.recentFps, dc: s1.designDataContext, xaml: s1.lastXaml })}`);
 			}
 			await previewCommand({ type: "setTheme", value: "Dark" });
 			await waitFor("dark while animating", (s) => (s.preview?.frame?.avgLum ?? 255) < 110, 15000);
@@ -597,6 +639,8 @@ suite("Avalonia previewer (e2e)", () => {
 
 	// ---------- language server: diagnostics, code fixes, hover, definition, generated members ----------
 	const lspFile = path.join(path.dirname(mainWindow), "E2eLsp.axaml");
+	// an internal class of the project (usable from its own XAML, missing from the public metadata)
+	const internalFile = path.join(path.dirname(mainWindow), "..", "ViewModels", "E2eInternal.cs");
 	const mainText = () => fs.readFileSync(mainWindow, "utf8");
 	const vmName = () => /x:DataType="\w+:(\w+)"/.exec(mainText())?.[1] ?? "MainViewModel";
 	const vmNamespace = () => /xmlns:vm="using:([\w.]+)"/.exec(mainText())?.[1] ?? "";
@@ -617,6 +661,11 @@ suite("Avalonia previewer (e2e)", () => {
 	};
 
 	test("XAML diagnostics without building (unknown types, properties, binding paths)", async () => {
+		if (isCSharp()) {
+			fs.writeFileSync(internalFile, `namespace ${vmNamespace()};
+internal class E2eInternalThing : Avalonia.Controls.Control { }
+`);
+		}
 		fs.writeFileSync(
 			lspFile,
 			`<UserControl xmlns="https://github.com/avaloniaui"
@@ -646,6 +695,8 @@ suite("Avalonia previewer (e2e)", () => {
         <Grid>
             <vm:${vmName()} Grid.Row="1"/>
         </Grid>
+        ${isCSharp() ? "<vm:E2eInternalThing/>" : ""}
+        <ListBox DisplayMemberBinding="{Binding ItemMemberOnly}" Classes.Accent="{Binding Greeting}"/>
     </StackPanel>
 </UserControl>
 `
@@ -663,6 +714,12 @@ suite("Avalonia previewer (e2e)", () => {
 		assert.strictEqual(diags.filter((d) => d.message.includes("'Greeting'")).length, 0, "binding inside DataTemplate DataType reported");
 		// an unprefixed attached property on a prefixed element is resolved in the default namespace
 		assert.ok(!diags.some((d) => d.message.includes("Type 'Grid' not found")), "Grid.Row on a prefixed element reported");
+		// a binding assigned to a binding-typed property (DisplayMemberBinding) is evaluated per item
+		assert.ok(!diags.some((d) => d.message.includes("ItemMemberOnly")), "binding assigned to a BindingBase property reported");
+		// Classes.Name="{Binding}" toggles a style class
+		assert.ok(!diags.some((d) => d.message.includes("'Accent'")), "Classes.Name reported");
+		// internal types of the project resolve (the new .cs file reaches the live compilation shortly)
+		await waitForDiagnostics("internal type resolved", (d) => !d.some((x) => x.message.includes("E2eInternalThing")), 30000);
 		const buton = diags.find((d) => d.message.includes("Buton"))!;
 		assert.strictEqual(lspDoc.getText(buton.range), "Buton");
 		await checkpoint("lsp-diagnostics");
@@ -721,6 +778,7 @@ suite("Avalonia previewer (e2e)", () => {
 			await vscode.window.showTextDocument(lspDoc, vscode.ViewColumn.One);
 			await vscode.commands.executeCommand("workbench.action.revertAndCloseActiveEditor");
 			fs.rmSync(lspFile, { force: true });
+			fs.rmSync(internalFile, { force: true });
 			await showMain();
 			this.skip();
 		}
@@ -752,6 +810,7 @@ suite("Avalonia previewer (e2e)", () => {
 			await vscode.window.showTextDocument(lspDoc, vscode.ViewColumn.One);
 			await vscode.commands.executeCommand("workbench.action.revertAndCloseActiveEditor");
 			fs.rmSync(lspFile, { force: true });
+			fs.rmSync(internalFile, { force: true });
 			await showMain();
 		}
 	});

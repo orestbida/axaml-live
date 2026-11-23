@@ -46,6 +46,8 @@ export class WebPreviewerPanel implements vscode.Disposable {
 	private _xaml: XamlState = {};
 	private _options: PanelOptions;
 	private _lastFrame: FrameMessage | undefined;
+	private _frameInFlight = 0; // time the frame being drawn was posted, 0 = none
+	private _frameWaiting = false;
 
 	private readonly _onDidDispose = new vscode.EventEmitter<void>();
 	public readonly onDidDispose = this._onDidDispose.event;
@@ -71,6 +73,8 @@ export class WebPreviewerPanel implements vscode.Disposable {
 			(msg) => {
 				if (msg?.type === "ready") {
 					this.postAll();
+				} else if (msg?.type === "frameDrawn") {
+					this.onFrameDrawn();
 				} else if (typeof msg?.type === "string") {
 					this._onMessage.fire(msg);
 				}
@@ -111,9 +115,30 @@ export class WebPreviewerPanel implements vscode.Disposable {
 		this._panel.webview.postMessage({ type: "options", options });
 	}
 
+	/**
+	 * Frames are megabytes: one is in flight to the webview at a time and only the newest waits, so a slow or hidden
+	 * webview never queues up stale frames (the designer keeps rendering, see PreviewSession.acceptFrame).
+	 */
 	public showFrame(frame: FrameMessage) {
 		this._lastFrame = frame;
+		if (this._frameInFlight && Date.now() - this._frameInFlight < 1000) {
+			this._frameWaiting = true;
+			return;
+		}
+		this.postFrame(frame);
+	}
+
+	private postFrame(frame: FrameMessage) {
+		this._frameInFlight = Date.now();
+		this._frameWaiting = false;
 		this._panel.webview.postMessage({ type: "frame", frame });
+	}
+
+	private onFrameDrawn() {
+		this._frameInFlight = 0;
+		if (this._frameWaiting && this._lastFrame) {
+			this.postFrame(this._lastFrame);
+		}
 	}
 
 	/** zoom: a factor, "fitAll" or "fitWidth"; applied by the webview, which reports back with a "view" message. */
@@ -129,7 +154,7 @@ export class WebPreviewerPanel implements vscode.Disposable {
 		this.setOptions(this._options);
 		this.postState();
 		if (this._lastFrame) {
-			this.showFrame(this._lastFrame);
+			this.postFrame(this._lastFrame);
 		}
 	}
 

@@ -1,7 +1,7 @@
 import * as assert from "assert";
 import { BSON } from "bson";
 import { Messages, MessageReader, InputModifier, mapKey } from "../../services/messageParser";
-import { averageLuminance, FrameRateLimiter } from "../../services/frameStats";
+import { averageLuminance, FrameRateLimiter, sampleAlpha } from "../../services/frameStats";
 
 suite("preview protocol messages", () => {
 	test("render info DPI is serialized as BSON double (the designer rejects int32)", () => {
@@ -35,6 +35,49 @@ suite("preview protocol messages", () => {
 		const reader = new MessageReader();
 		assert.strictEqual(reader.push(frame.subarray(0, 7)).length, 0);
 		assert.strictEqual(reader.push(frame.subarray(7)).length, 1);
+	});
+
+	test("large messages in small chunks, split anywhere (also inside the header)", () => {
+		const data = Buffer.alloc(3 * 1024 * 1024, 7);
+		const one = Messages.frameReceivedMessage(1);
+		const stream = Buffer.concat([one, Messages.pointerMovedMessage(1, 2, []), one]);
+		const big = Buffer.concat([stream.subarray(0, one.length), stream.subarray(one.length)]);
+		// a 3 MB BSON body (like a frame) between small messages
+		const { BSON } = require("bson");
+		// eslint-disable-next-line @typescript-eslint/naming-convention -- designer protocol fields
+		const body = Buffer.from(BSON.serialize({ Data: data, Width: 1, Height: 1 }));
+		const len = Buffer.alloc(4);
+		len.writeUInt32LE(body.length, 0);
+		const frameMsg = Buffer.concat([len, Buffer.alloc(16), body]);
+		const all = Buffer.concat([big, frameMsg, one]);
+		for (const chunkSize of [1, 13, 20, 65536]) {
+			const reader = new MessageReader();
+			const msgs = [];
+			const limit = chunkSize === 1 ? 4096 : all.length; // byte-by-byte only through the small messages
+			for (let i = 0; i < limit; i += chunkSize) {
+				msgs.push(...reader.push(all.subarray(i, Math.min(i + chunkSize, limit))));
+			}
+			if (limit < all.length) {
+				msgs.push(...reader.push(all.subarray(limit)));
+			}
+			assert.strictEqual(msgs.length, 5, `chunk ${chunkSize}`);
+			assert.strictEqual(msgs[3].body.Data.length, data.length, `chunk ${chunkSize}`);
+			assert.strictEqual(msgs[4].type, Messages.frameReceived);
+		}
+	});
+
+	test("reassembling a large message is linear (no copy of everything received per chunk)", () => {
+		const body = Buffer.alloc(16 * 1024 * 1024);
+		const len = Buffer.alloc(4);
+		len.writeUInt32LE(body.length, 0);
+		const msg = Buffer.concat([len, Buffer.alloc(16), body]);
+		const reader = new MessageReader();
+		const t0 = Date.now();
+		for (let i = 0; i < msg.length; i += 16384) {
+			reader.push(msg.subarray(i, i + 16384));
+		}
+		// quadratic: ~8 GB copied; linear: 16 MB
+		assert.ok(Date.now() - t0 < 300, `took ${Date.now() - t0} ms`);
 	});
 
 	test("DOM keys map to Avalonia keys", () => {
@@ -72,3 +115,13 @@ function lengthPrefix(n: number) {
 	b.writeUInt32LE(n);
 	return b;
 }
+
+suite("frame transparency", () => {
+	test("an empty (never rendered) frame is fully transparent", () => {
+		const empty = new Uint8Array(98 * 91 * 4);
+		assert.strictEqual(sampleAlpha(empty), 0);
+		const rendered = new Uint8Array(98 * 91 * 4).fill(255);
+		assert.strictEqual(sampleAlpha(rendered), 255);
+		assert.strictEqual(sampleAlpha(new Uint8Array(0)), 0);
+	});
+});

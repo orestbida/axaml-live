@@ -54,6 +54,57 @@ export function applyDesignSize(xaml: string, width: number, height: number): st
 	return applyEdits(xaml, edits);
 }
 
+const avaloniaNamespace = "https://github.com/avaloniaui";
+const xamlNamespace = "http://schemas.microsoft.com/winfx/2006/xaml";
+
+/**
+ * Views often declare `x:DataType` for compiled bindings but no `Design.DataContext`, so the preview shows an
+ * empty shell. Adds `<Design.DataContext><vm:Type/></Design.DataContext>` for the root's x:DataType, on the line of
+ * the root start tag so error line numbers stay correct. The caller falls back to the original XAML when the type
+ * cannot be constructed.
+ */
+export function applyDesignDataContext(xaml: string): string {
+	const root = parseXml(xaml)?.root;
+	if (!root || root.selfClosing) {
+		return xaml;
+	}
+	const ns = new Map(root.attributes.filter((a) => a.name === "xmlns" || a.name.startsWith("xmlns:"))
+		.map((a) => [a.name === "xmlns" ? "" : a.name.substring(6), a.value]));
+	const prefixOf = (uri: string) => [...ns].find(([, v]) => v === uri)?.[0];
+	const x = prefixOf(xamlNamespace);
+	const rootName = localName(root.name);
+	if (x === undefined || ns.get("") !== avaloniaNamespace || root.name.includes(":") || ["Styles", "ResourceDictionary", "Application"].includes(rootName)) {
+		return xaml;
+	}
+	const hasDataContext =
+		root.attributes.some((a) => a.name === "DataContext" || a.name === "Design.DataContext") ||
+		root.children.some((c) => c.kind === "element" && (c.name === "Design.DataContext" || c.name === `${root.name}.DataContext`));
+	if (hasDataContext) {
+		return xaml;
+	}
+	const at = root.startTagEnd;
+	const dataType = getAttribute(root, `${x}:DataType`)?.value.trim();
+	if (dataType) {
+		return /^([A-Za-z_]\w*:)?[A-Za-z_][\w.]*$/.test(dataType)
+			? applyEdits(xaml, [{ start: at, end: at, text: `<Design.DataContext><${dataType}/></Design.DataContext>` }])
+			: xaml;
+	}
+	// no x:DataType: the template's ViewLocator maps Xxx.ViewModels.FooViewModel to Xxx.Views.FooView; reverse it
+	const xClass = getAttribute(root, `${x}:Class`)?.value.trim();
+	if (!xClass || !/^[\w.]+$/.test(xClass) || !/View$/.test(xClass)) {
+		return xaml;
+	}
+	const viewModel = xClass.replace(/View(?!Model)/g, "ViewModel");
+	const dot = viewModel.lastIndexOf(".");
+	if (dot < 0) {
+		return xaml;
+	}
+	return applyEdits(xaml, [
+		{ start: at, end: at, text: `<Design.DataContext><designvm:${viewModel.substring(dot + 1)}/></Design.DataContext>` },
+		{ start: at - 1, end: at - 1, text: ` xmlns:designvm="clr-namespace:${viewModel.substring(0, dot)}"` },
+	]);
+}
+
 function setRootAttribute(xaml: string, root: XmlElement, name: string, value: string): string {
 	const existing = getAttribute(root, name);
 	if (existing) {

@@ -145,21 +145,31 @@ export interface IncomingMessage {
  * Accumulates TCP chunks and yields complete messages.
  * TCP is a stream: one `data` event may contain a partial message or several messages.
  */
+/**
+ * Splits the designer's TCP stream into messages. Frames are megabytes and arrive in small chunks: chunks are kept
+ * in a list and joined once per message (joining on every chunk is quadratic and halves the frame rate).
+ */
 export class MessageReader {
-	private _buffer = Buffer.alloc(0);
+	private _chunks: Buffer[] = [];
+	private _size = 0;
 
 	public push(chunk: Buffer): IncomingMessage[] {
-		this._buffer = this._buffer.length ? Buffer.concat([this._buffer, chunk]) : chunk;
+		this._chunks.push(chunk);
+		this._size += chunk.length;
 		const result: IncomingMessage[] = [];
 
-		while (this._buffer.length >= 20) {
-			const length = this._buffer.readUInt32LE(0);
-			if (this._buffer.length < 20 + length) {
+		while (this._size >= 20) {
+			const head = this._chunks[0].length >= 20 ? this._chunks[0] : this.join();
+			const length = head.readUInt32LE(0);
+			if (this._size < 20 + length) {
 				break;
 			}
-			const type = guidFromBytes(this._buffer.subarray(4, 20));
-			const bodyBytes = this._buffer.subarray(20, 20 + length);
-			this._buffer = this._buffer.subarray(20 + length);
+			const all = this.join();
+			const type = guidFromBytes(all.subarray(4, 20));
+			const bodyBytes = all.subarray(20, 20 + length);
+			const rest = all.subarray(20 + length);
+			this._chunks = rest.length ? [rest] : [];
+			this._size = rest.length;
 
 			try {
 				result.push({ type, body: BSON.deserialize(bodyBytes, { promoteBuffers: true }) });
@@ -168,6 +178,13 @@ export class MessageReader {
 			}
 		}
 		return result;
+	}
+
+	private join(): Buffer {
+		if (this._chunks.length > 1) {
+			this._chunks = [Buffer.concat(this._chunks, this._size)];
+		}
+		return this._chunks[0];
 	}
 }
 

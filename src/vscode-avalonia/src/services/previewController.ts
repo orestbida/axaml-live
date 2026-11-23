@@ -9,8 +9,10 @@ import { PreviewSession, PreviewFrame, canStartPreviewer, isSameProject, XamlRes
 import { PanelOptions, WebPreviewerPanel } from "../panels/WebPreviwerPanel";
 import { AppConstants, isAvaloniaFile, logger, samePath } from "../util/Utilities";
 import { Messages, mapKey } from "./messageParser";
-import { averageLuminance } from "./frameStats";
-import { applyDesignSize, applyThemeVariant } from "../xaml/designTransforms";
+import { averageLuminance, sampleAlpha, sampleLuminance } from "./frameStats";
+import { CrashGuard } from "./crashInfo";
+import { missingSdk } from "./parserOutput";
+import { applyDesignDataContext, applyDesignSize, applyThemeVariant } from "../xaml/designTransforms";
 import { formFactors, resolveFormFactor } from "../xaml/formFactors";
 
 interface ViewInfo {
@@ -49,6 +51,23 @@ export class PreviewController implements vscode.Disposable {
 	private _generation = 0;
 	private _lastXaml: XamlResult | undefined;
 	private _xamlResults = 0;
+	private readonly _crashGuard = new CrashGuard();
+	private _crashes = 0;
+	/** Recent frames, updates and results, for diagnosing previews (debug state only). */
+	private readonly _trace: string[] = [];
+	private _traceStart = Date.now();
+
+	private trace(event: string) {
+		this._trace.push(`${Date.now() - this._traceStart}ms ${event}`);
+		if (this._trace.length > 30) {
+			this._trace.shift();
+		}
+	}
+	private _lastCrash: string | undefined;
+	/** The last update carried an automatic Design.DataContext (see applyDesignDataContext). */
+	private _pushedDesignDataContext = false;
+	/** Files whose x:DataType could not be constructed by the designer; cleared when the previewer restarts. */
+	private readonly _designDataContextFailed = new Set<string>();
 	private _restarts = 0;
 	private readonly _disposables: vscode.Disposable[] = [];
 	private readonly _diagnostics = vscode.languages.createDiagnosticCollection("Avalonia Previewer");
@@ -95,6 +114,9 @@ export class PreviewController implements vscode.Disposable {
 					(this.config.get<boolean>("syncWithLaunchConfig", false) && e.affectsConfiguration("launch"));
 				if (this._panel && hostChanged) {
 					this.restart();
+				}
+				if (e.affectsConfiguration("avalonia.previewer.designDataContext")) {
+					this.pushXaml();
 				}
 				if (e.affectsConfiguration("avalonia.previewer.fpsLimit")) {
 					this._session?.setFpsLimit(this.fpsLimit);
@@ -194,6 +216,39 @@ export class PreviewController implements vscode.Disposable {
 
 	private _optionsTimer: NodeJS.Timeout | undefined;
 	private _watchdog: NodeJS.Timeout | undefined;
+	private _renderCheck: NodeJS.Timeout | undefined;
+	private readonly _stallGuard = new CrashGuard();
+	private _stalls = 0;
+
+	/**
+	 * After a successful update the designer paints the new window within a few frames. Some views (seen with
+	 * ReactiveUI's RoutedViewHost) leave the designer's render loop stuck: later windows get one empty (transparent)
+	 * frame or none at all. A new designer process recovers; once per file, so a view that never paints cannot loop.
+	 */
+	private checkRendered(file: vscode.Uri, framesAtResult: number) {
+		clearTimeout(this._renderCheck);
+		const session = this._session;
+		this._renderCheck = setTimeout(() => {
+			if (this._session !== session || !session || session.state !== "ready" || !this._file || !samePath(this._file.fsPath, file.fsPath)) {
+				return;
+			}
+			// an unpainted frame is (almost) fully transparent; painted windows are opaque
+			const painted = this._frames > framesAtResult && !!this._lastFrameData && sampleAlpha(this._lastFrameData) >= 32;
+			if (painted) {
+				this._stallGuard.reset();
+				return;
+			}
+			this.trace("nothing painted after the update");
+			if (this._stallGuard.onCrash(file.fsPath)) {
+				this._stalls++;
+				logger.info(`The designer painted nothing for ${path.basename(file.fsPath)}; restarting it.`);
+				this._panel?.setState({ status: "starting", message: "The designer stopped painting · restarting…" });
+				void this.startSession(session.project, false);
+			} else {
+				this._panel?.setState({ status: "ready", message: `${session.project.name} · ${path.basename(file.fsPath)} · the designer painted nothing for this view` });
+			}
+		}, 1500);
+	}
 
 	/** Toolbar changes in quick succession result in one XAML update (each update opens a new design window). */
 	private optionsChanged() {
@@ -250,6 +305,7 @@ export class PreviewController implements vscode.Disposable {
 
 	private onFrame(frame: PreviewFrame) {
 		this._frames++;
+		this.trace(`frame #${frame.sequenceId} ${frame.width}x${frame.height}@${frame.scale} lum~${sampleLuminance(frame.data)}`);
 		logger.debug(`Frame ${frame.sequenceId} ${frame.width}x${frame.height} scale=${frame.scale}`);
 		const now = Date.now();
 		this._frameTimes.push(now);
@@ -284,6 +340,9 @@ export class PreviewController implements vscode.Disposable {
 
 	/** Switches the previewed file; starts a new previewer only when the host project changes. */
 	private async setFile(uri: vscode.Uri) {
+		if (!this._file || !samePath(this._file.fsPath, uri.fsPath)) {
+			this._crashGuard.reset();
+		}
 		this._file = uri;
 		this._panel?.setTitle(uri);
 
@@ -358,15 +417,28 @@ export class PreviewController implements vscode.Disposable {
 		this.watchOutput(project);
 
 		session.onFrame((f) => this._session === session && this.onFrame(f));
+		let wasReady = false;
 		session.onDidChangeState((state) => {
 			if (this._session !== session) {
 				return;
 			}
 			if (state === "ready") {
+				wasReady = true;
 				// frames travel through the extension host, so this also works remotely (SSH, WSL, Codespaces)
 				this._panel?.setState({ status: "ready", message: `${project.name} · ${path.basename(this._file?.fsPath ?? "")}` });
 			} else if (state === "exited") {
-				this.showError(session.exitReason ?? "Previewer stopped.", session.recentOutput);
+				const reason = session.exitReason ?? "Previewer stopped.";
+				logger.warn(reason);
+				// user code that throws at design time (e.g. in OnLoaded) ends the designer: start a new one so other
+				// files and the next edit preview again; the guard stops when the same file keeps crashing it
+				if (wasReady && this._crashGuard.onCrash(this._file?.fsPath)) {
+					this._crashes++;
+					this._lastCrash = reason;
+					this._panel?.setState({ status: "starting", message: `${reason} · restarting…` });
+					setTimeout(() => this._session === session && void this.startSession(project, false), 500);
+				} else {
+					this.showError(reason, session.recentOutput);
+				}
 			}
 		});
 		session.onXamlResult((r) => this.onXamlResult(r));
@@ -399,6 +471,7 @@ export class PreviewController implements vscode.Disposable {
 	private stopSession() {
 		this._session?.dispose();
 		this._session = undefined;
+		this._designDataContextFailed.clear();
 		this.disposeWatchers();
 	}
 
@@ -419,6 +492,12 @@ export class PreviewController implements vscode.Disposable {
 		if (!file || !session) {
 			return;
 		}
+		if (session.state === "exited") {
+			// stopped after crashing: an edit or option change tries again
+			this._crashGuard.reset();
+			void this.startSession(session.project, false);
+			return;
+		}
 		const details = sln.getFileDetails(file.fsPath);
 		if (!details) {
 			return;
@@ -429,27 +508,42 @@ export class PreviewController implements vscode.Disposable {
 			return;
 		}
 		// previewer options are applied to the XAML sent to the designer only, never to the document
-		text = applyThemeVariant(text, this._theme);
+		const withDataContext = this.config.get<boolean>("designDataContext", true) && !this._designDataContextFailed.has(file.fsPath)
+			? applyDesignDataContext(text)
+			: text;
+		this._pushedDesignDataContext = withDataContext !== text;
+		text = applyThemeVariant(withDataContext, this._theme);
 		const size = resolveFormFactor(this._formFactor, this._rotated);
 		if (size) {
 			text = applyDesignSize(text, size.width, size.height);
 		}
 		logger.debug(`UpdateXaml ${path.basename(file.fsPath)} theme=${this._theme} size=${size ? `${size.width}x${size.height}` : "design"}`);
+		this.trace(`update ${path.basename(file.fsPath)}${this._pushedDesignDataContext ? " +designDC" : ""}`);
 		session.updateXaml(details, text);
 		this.armWatchdog(this._frames, retryIfStuck);
 	}
 
 	private onXamlResult(r: XamlResult) {
+		const error = r.message ?? r.error;
+		this.trace(`result ${error ? "error: " + error.split("\n")[0].slice(0, 80) : "ok"}`);
+		const file = this._file;
+		if (file && error && this._pushedDesignDataContext) {
+			// the x:DataType could not be constructed at design time: preview without it
+			logger.info(`Preview without automatic design data context for ${path.basename(file.fsPath)}: ${error.split("\n")[0]}`);
+			this._designDataContextFailed.add(file.fsPath);
+			this.pushXaml();
+			return;
+		}
+		// recorded only now: the result of the attempt with the automatic data context is not the file's result
 		this._lastXaml = r;
 		this._xamlResults++;
-		const file = this._file;
 		if (!file) {
 			return;
 		}
-		const error = r.message ?? r.error;
 		this._panel?.setXaml(error ? { error: (r.exceptionType ? `${r.exceptionType}: ` : "") + error, line: r.line } : {});
 		if (!error) {
 			this._diagnostics.delete(file);
+			this.checkRendered(file, this._frames);
 			return;
 		}
 		const line = Math.max((r.line ?? 1) - 1, 0);
@@ -505,6 +599,22 @@ export class PreviewController implements vscode.Disposable {
 		}
 		clearTimeout(this._restartTimer); // ignore watcher events caused by our own build
 
+		const sdk = !result.ok ? missingSdk(result.output ?? result.tail) : undefined;
+		if (sdk) {
+			// global.json pins an SDK that is not installed: say so instead of a generic build failure
+			const msg = `Cannot build ${project.name}: global.json requests .NET SDK ${sdk.version}, which is not installed.`;
+			this.showError(msg, `Install .NET SDK ${sdk.version} (${sdk.downloadUrl}) or change ${sdk.globalJson ?? "global.json"}. Projects that are already built can still be previewed.`, true);
+			const download = "Download .NET SDK";
+			const open = "Open global.json";
+			vscode.window.showErrorMessage(msg, download, ...(sdk.globalJson ? [open] : [])).then((r) => {
+				if (r === download) {
+					vscode.env.openExternal(vscode.Uri.parse(sdk.downloadUrl));
+				} else if (r === open && sdk.globalJson) {
+					vscode.window.showTextDocument(vscode.Uri.file(sdk.globalJson));
+				}
+			});
+			return false;
+		}
 		if (!result.ok) {
 			const msg = `Build failed for ${project.name}.`;
 			this.showError(msg, result.errors || result.tail, true);
@@ -592,6 +702,12 @@ export class PreviewController implements vscode.Disposable {
 			previewerPid: this._session?.pid,
 			sessionsStarted: this._restarts,
 			lastXaml: this._lastXaml,
+			designDataContext: this._pushedDesignDataContext,
+			crashes: this._crashes,
+			stalls: this._stalls,
+			trace: [...this._trace],
+			sessionTrace: [...(this._session?.trace ?? [])],
+			lastCrash: this._lastCrash,
 			xamlResults: this._xamlResults,
 			building: !!this._building,
 			preview: {
@@ -628,6 +744,7 @@ export interface BuildResult {
 	ok: boolean;
 	errors: string;
 	tail: string;
+	output?: string;
 }
 
 export function dotnetBuild(projectPath: string): Promise<BuildResult> {
@@ -655,7 +772,7 @@ export function dotnetBuild(projectPath: string): Promise<BuildResult> {
 		proc.stderr.on("data", onData);
 		proc.on("error", (e) => resolve({ ok: false, errors: `Failed to run dotnet: ${e.message}`, tail: "" }));
 		proc.on("close", (code) =>
-			resolve({ ok: code === 0, errors: [...errors].slice(0, 10).join("\n"), tail: lines.slice(-10).join("\n") })
+			resolve({ ok: code === 0, errors: [...errors].slice(0, 10).join("\n"), tail: lines.slice(-10).join("\n"), output: lines.join("\n") })
 		);
 	});
 }

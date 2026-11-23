@@ -250,6 +250,11 @@
             "default": true,
             "description": "Forward mouse and keyboard input to the previewed UI (toggle with the 🖱 button)."
           },
+          "avalonia.previewer.designDataContext": {
+            "type": "boolean",
+            "default": true,
+            "description": "When a view declares x:DataType but no Design.DataContext, preview it with a new instance of that type (if it can be constructed), so bindings show data instead of an empty view."
+          },
           "avalonia.previewer.fpsLimit": {
             "type": "number",
             "default": 60,

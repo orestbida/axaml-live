@@ -12,10 +12,21 @@ Previewer:
   XAML sent to the previewer only.
 - Mouse, wheel and keyboard input with a toggle; FPS limit; auto-open; previewer host from launch.json.
 - Native runtimes come from an immutable per-platform cache: builds never hit locked native DLLs.
+- Design data: views with `x:DataType` (or following the ViewLocator convention `Views.FooView` →
+  `ViewModels.FooViewModel`) but no `Design.DataContext` preview with an instance of their view model; falls back when it
+  cannot be constructed (`avalonia.previewer.designDataContext`).
+- Recovers from designer crashes (user code throwing at design time, e.g. in OnLoaded): names the exception and the
+  user frame, restarts the designer; also restarts when the designer stops painting.
+- Large frames: linear message reader, acknowledge before forwarding, one frame in flight to the webview (smooth
+  animations in maximized windows).
+- A `global.json` that pins a missing SDK no longer blocks previews: the solution is analyzed with the newest installed
+  SDK; a build explains which SDK to install.
 
 Language features:
 
-- Diagnostics without building (unknown types, properties, events, compiled binding paths) with quick fixes.
+- Diagnostics without building (unknown types, properties, events, compiled binding paths) with quick fixes. Tested on
+  real projects: DataTemplate `DataType`, `Classes.Name` bindings, binding-typed properties (`DisplayMemberBinding`),
+  internal types and attached properties with unusual accessors are handled.
 - Hover with documentation; go to definition (x:Class, x:DataType, types, binding members, event handlers, resources).
 - The language server compiles projects in memory (Roslyn): source-generated members are known without building.
 - Show Code-behind (F7) / Show ViewModel (Shift+F7), Run / Debug project, install/update templates.

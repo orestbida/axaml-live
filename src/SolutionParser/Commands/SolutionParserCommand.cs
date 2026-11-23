@@ -43,18 +43,46 @@ public sealed class SolutionParserCommand : Command<SolutionParserCommand.Settin
 
         // Lookup a MSBuild instance from the installed dotnet SDKs.
         // The results should NOT be ordered: the first one matches the global.json if present.
-        var msbuildInstance = MSBuildLocator
-            .QueryVisualStudioInstances(new VisualStudioInstanceQueryOptions
-            {
-                DiscoveryTypes = DiscoveryType.DotNetSdk,
-                WorkingDirectory = solutionFolderPath
-            })
-            .FirstOrDefault();
+        VisualStudioInstance? msbuildInstance;
+        try
+        {
+            msbuildInstance = MSBuildLocator
+                .QueryVisualStudioInstances(new VisualStudioInstanceQueryOptions
+                {
+                    DiscoveryTypes = DiscoveryType.DotNetSdk,
+                    WorkingDirectory = solutionFolderPath
+                })
+                .FirstOrDefault();
+        }
+        catch (Exception e)
+        {
+            // hostfxr fails when global.json requests an SDK that is not installed
+            Console.Error.WriteLine(e.Message);
+            msbuildInstance = null;
+        }
 
         if (msbuildInstance is null)
         {
-            Console.Error.WriteLine($"Could not find a matching .NET SDK for {solutionFolderPath}");
-            return 2;
+            // global.json pins an SDK that is not installed (e.g. rollForward: disable). Building needs that SDK, but
+            // finding the projects' outputs for the previewer does not: analyze with the newest installed SDK.
+            msbuildInstance = MSBuildLocator
+                .QueryVisualStudioInstances(new VisualStudioInstanceQueryOptions
+                {
+                    DiscoveryTypes = DiscoveryType.DotNetSdk,
+                    WorkingDirectory = Path.GetTempPath()
+                })
+                .OrderByDescending(i => i.Version)
+                .FirstOrDefault();
+            if (msbuildInstance is null)
+            {
+                Console.Error.WriteLine($"Could not find a matching .NET SDK for {solutionFolderPath}");
+                return 2;
+            }
+            Console.Error.WriteLine($"warning: the .NET SDK requested by global.json is not installed; analyzing the solution with SDK {msbuildInstance.Version}");
+            // project evaluation resolves Microsoft.NET.Sdk through global.json too: point the resolver at this SDK
+            var sdkDir = msbuildInstance.MSBuildPath;
+            Environment.SetEnvironmentVariable("DOTNET_MSBUILD_SDK_RESOLVER_SDKS_DIR", Path.Combine(sdkDir, "Sdks"));
+            Environment.SetEnvironmentVariable("DOTNET_MSBUILD_SDK_RESOLVER_SDKS_VER", Path.GetFileName(sdkDir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)));
         }
 
         MSBuildLocator.RegisterInstance(msbuildInstance);

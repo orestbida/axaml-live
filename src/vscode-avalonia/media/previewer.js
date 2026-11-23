@@ -223,6 +223,7 @@
 						if (f) {
 							drawFrame(f);
 						}
+						send({ type: "frameDrawn" }); // the extension posts the next frame only now
 					});
 				}
 				pendingFrame = msg.frame;

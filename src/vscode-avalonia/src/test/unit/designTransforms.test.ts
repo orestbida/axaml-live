@@ -1,5 +1,5 @@
 import * as assert from "assert";
-import { applyDesignSize, applyThemeVariant } from "../../xaml/designTransforms";
+import { applyDesignDataContext, applyDesignSize, applyThemeVariant } from "../../xaml/designTransforms";
 import { formFactors, resolveFormFactor } from "../../xaml/formFactors";
 
 const windowXaml = `<Window xmlns="https://github.com/avaloniaui"
@@ -96,5 +96,66 @@ suite("form factors", () => {
 
 	test("default form factor resolves to no size", () => {
 		assert.strictEqual(resolveFormFactor("default", true), undefined);
+	});
+});
+
+suite("design transforms: design data context", () => {
+	const head = `<UserControl xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:vm="clr-namespace:App.ViewModels"`;
+
+	test("instantiates the x:DataType of the root on the same line", () => {
+		const xaml = `${head} x:DataType="vm:MainViewModel">\n  <TextBlock Text="{Binding Title}"/>\n</UserControl>`;
+		const out = applyDesignDataContext(xaml);
+		assert.strictEqual(
+			out,
+			`${head} x:DataType="vm:MainViewModel"><Design.DataContext><vm:MainViewModel/></Design.DataContext>\n  <TextBlock Text="{Binding Title}"/>\n</UserControl>`
+		);
+		assert.strictEqual(out.split("\n").length, xaml.split("\n").length, "line numbers are kept");
+	});
+
+	test("keeps an existing Design.DataContext or DataContext", () => {
+		for (const xaml of [
+			`${head} x:DataType="vm:A"><Design.DataContext><vm:B/></Design.DataContext></UserControl>`,
+			`${head} x:DataType="vm:A" DataContext="{Binding X}"></UserControl>`,
+			`${head} x:DataType="vm:A" Design.DataContext="{x:Null}"></UserControl>`,
+			`${head} x:DataType="vm:A"><UserControl.DataContext><vm:B/></UserControl.DataContext></UserControl>`,
+		]) {
+			assert.strictEqual(applyDesignDataContext(xaml), xaml, xaml);
+		}
+	});
+
+	test("skips roots without a usable type", () => {
+		for (const xaml of [
+			`${head}></UserControl>`,
+			`${head} x:DataType="vm:A"/>`,
+			`${head} x:DataType="{x:Type vm:A}"></UserControl>`,
+			`<Styles xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" x:DataType="A"></Styles>`,
+			`<UserControl xmlns="urn:other" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" x:DataType="A"></UserControl>`,
+		]) {
+			assert.strictEqual(applyDesignDataContext(xaml), xaml, xaml);
+		}
+	});
+});
+
+suite("design transforms: design data context by ViewLocator convention", () => {
+	const head = `<UserControl xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"`;
+
+	test("Views.XView -> ViewModels.XViewModel (the template's ViewLocator, reversed)", () => {
+		const xaml = `${head} x:Class="Demo.Views.Grid.FilteringView">\n  <TextBlock/>\n</UserControl>`;
+		assert.strictEqual(
+			applyDesignDataContext(xaml),
+			`${head} x:Class="Demo.Views.Grid.FilteringView" xmlns:designvm="clr-namespace:Demo.ViewModels.Grid"><Design.DataContext><designvm:FilteringViewModel/></Design.DataContext>\n  <TextBlock/>\n</UserControl>`
+		);
+	});
+
+	test("x:DataType wins; no convention without View in the name or with an existing context", () => {
+		const typed = `${head} xmlns:vm="clr-namespace:A" x:Class="Demo.Views.MainView" x:DataType="vm:Other"></UserControl>`;
+		assert.ok(applyDesignDataContext(typed).includes("<vm:Other/>"));
+		for (const xaml of [
+			`${head} x:Class="Demo.MainWindow"></UserControl>`,
+			`${head} x:Class="Demo.Views.MainView" DataContext="{Binding}"></UserControl>`,
+			`${head} x:Class="Demo.Views.MainView"><Design.DataContext><x:Null/></Design.DataContext></UserControl>`,
+		]) {
+			assert.strictEqual(applyDesignDataContext(xaml), xaml, xaml);
+		}
 	});
 });

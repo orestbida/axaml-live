@@ -11,6 +11,7 @@ import { Messages, MessageReader } from "./messageParser";
 import { FrameRateLimiter } from "./frameStats";
 import { AppConstants, logger, samePath } from "../util/Utilities";
 import { XamlResult, parseXamlError } from "./xamlError";
+import { summarizeCrash } from "./crashInfo";
 
 
 export type SessionState = "starting" | "ready" | "exited";
@@ -150,11 +151,11 @@ export class PreviewSession implements vscode.Disposable {
 			this.exitReason = `Failed to start 'dotnet': ${e.message}`;
 			this.setState("exited");
 		});
-		proc.on("exit", (code) => {
-			logger.info(`Previewer process for ${p.name} exited with code ${code}`);
+		proc.on("exit", (code, signal) => {
+			logger.info(`Previewer process for ${p.name} exited with code ${code}${signal ? ` (${signal})` : ""}`);
 			this._process = undefined;
 			if (!this._disposed) {
-				this.exitReason ??= `Previewer process exited with code ${code}`;
+				this.exitReason ??= summarizeCrash(this._log, code, signal);
 				this.setState("exited");
 			}
 		});
@@ -171,6 +172,7 @@ export class PreviewSession implements vscode.Disposable {
 		// each update opens a new design window: from now on no acknowledgement may reach it before its own first frame
 		this.cancelPendingAcks();
 		this._pendingUpdates++;
+		this.log(`update pending=${this._pendingUpdates}`);
 		this._socket.write(Messages.updateXamlMessage(assemblyPath, text, relative));
 	}
 
@@ -197,6 +199,7 @@ export class PreviewSession implements vscode.Disposable {
 
 	private onUpdateResult(failed: boolean) {
 		this._pendingUpdates = Math.max(0, this._pendingUpdates - 1);
+		this.log(`result ${failed ? "failed" : "ok"} pending=${this._pendingUpdates} held=${this._held ? "#" + this._held.frame.sequenceId : "-"} ackCancelled=${this._ackCancelled}`);
 		if (this._pendingUpdates > 0) {
 			return;
 		}
@@ -219,8 +222,8 @@ export class PreviewSession implements vscode.Disposable {
 
 	private acceptFrame(socket: net.Socket, frame: PreviewFrame) {
 		this._lastAccepted = { socket, sequenceId: frame.sequenceId };
-		this._onFrame.fire(frame);
-		// the designer sends the next frame only after this acknowledgement: delaying it caps the frame rate
+		// the designer renders the next frame only after this acknowledgement: send it first, so the designer renders
+		// while this frame travels to the webview; delaying it caps the frame rate
 		const delay = this._limiter.delay(Date.now());
 		if (delay > 0) {
 			const timer = setTimeout(() => {
@@ -231,9 +234,21 @@ export class PreviewSession implements vscode.Disposable {
 		} else {
 			this.ack(socket, frame.sequenceId);
 		}
+		this._onFrame.fire(frame);
+	}
+
+	/** Flow-control events (frames held/dropped, acknowledgements), for diagnostics. */
+	public readonly trace: string[] = [];
+	private _traceStart = Date.now();
+	private log(event: string) {
+		this.trace.push(`${Date.now() - this._traceStart}ms ${event}`);
+		if (this.trace.length > 40) {
+			this.trace.shift();
+		}
 	}
 
 	private ack(socket: net.Socket, sequenceId: number) {
+		this.log(`ack #${sequenceId}`);
 		if (!socket.destroyed) {
 			socket.write(Messages.frameReceivedMessage(sequenceId));
 		}
@@ -351,6 +366,7 @@ export class PreviewSession implements vscode.Disposable {
 			data: data ?? Buffer.alloc(0),
 		};
 		if (this._pendingUpdates > 0) {
+			this.log(`hold #${sequenceId} ${body.Width}x${body.Height}${this._held ? ` (replaces #${this._held.frame.sequenceId})` : ""}`);
 			this._held = { socket, frame }; // decided when the update result arrives
 			return;
 		}

@@ -61,7 +61,7 @@ public sealed class XamlAnalyzer
                 var owner = ResolveType(el.NamespaceUri, el.LocalName[..dot]);
                 if (owner == null)
                 {
-                    if (NamespaceKnown(el.NamespaceUri))
+                    if (NamespaceKnown(el.NamespaceUri) && !InCompilation(el.NamespaceUri, el.LocalName[..dot]))
                         result.Add(UnknownType(el.NameRange with { End = el.NameRange.Start with { Character = el.NameRange.Start.Character + dot } }, el.LocalName[..dot], el.NamespaceUri));
                     continue;
                 }
@@ -77,7 +77,7 @@ public sealed class XamlAnalyzer
             type = ResolveType(el.NamespaceUri, el.LocalName);
             if (type == null)
             {
-                if (NamespaceKnown(el.NamespaceUri))
+                if (NamespaceKnown(el.NamespaceUri) && !InCompilation(el.NamespaceUri, el.LocalName))
                     result.Add(UnknownType(el.NameRange, el.LocalName, el.NamespaceUri));
                 continue;
             }
@@ -91,25 +91,33 @@ public sealed class XamlAnalyzer
                 // unprefixed attached properties (Grid.Row) resolve their owner in the default namespace,
                 // also on prefixed elements (<local:MyControl Grid.Row="1">)
                 var attrNs = a.Prefix == "" ? el.Namespaces.GetValueOrDefault("", el.NamespaceUri) : a.NamespaceUri;
+                // Classes.Name="{Binding}" toggles a style class
+                if (a.Prefix == "" && a.LocalName.StartsWith("Classes.", StringComparison.Ordinal))
+                    continue;
                 if (a.LocalName.Contains('.'))
                 {
                     var dot = a.LocalName.IndexOf('.');
                     var owner = ResolveType(attrNs, a.LocalName[..dot]);
                     if (owner == null)
                     {
-                        if (NamespaceKnown(attrNs))
+                        if (NamespaceKnown(attrNs) && !InCompilation(attrNs, a.LocalName[..dot]))
                             result.Add(UnknownType(a.NameRange with { End = a.NameRange.Start with { Character = a.NameRange.Start.Character + dot } }, a.LocalName[..dot], attrNs));
                         continue;
                     }
                     var name = a.LocalName[(dot + 1)..];
-                    if (FindProperty(owner, name) == null && FindEvent(owner, name) == null)
+                    var prop = FindProperty(owner, name);
+                    if (prop == null && FindEvent(owner, name) == null && !HasAvaloniaProperty(owner, name))
                         result.Add(UnknownMember(a.NameRange with { Start = a.NameRange.Start with { Character = a.NameRange.Start.Character + dot + 1 } }, name, owner));
+                    else if (!IsBindingType(prop?.Type))
+                        CheckBinding(el, a, result);
                 }
-                else if (a.Prefix == "" && FindProperty(type, a.LocalName) == null && FindEvent(type, a.LocalName) == null)
+                else if (a.Prefix == "" && FindProperty(type, a.LocalName) == null && FindEvent(type, a.LocalName) == null && !HasAvaloniaProperty(type, a.LocalName))
                 {
                     result.Add(UnknownMember(a.NameRange, a.LocalName, type));
                 }
-                else
+                // a binding assigned to a binding-typed property (ItemsControl.DisplayMemberBinding, ...)
+                // is evaluated later against each item, not against this data context
+                else if (!IsBindingType(FindProperty(type, a.LocalName)?.Type))
                 {
                     CheckBinding(el, a, result);
                 }
@@ -313,6 +321,39 @@ public sealed class XamlAnalyzer
         NamespaceTypes(ns) is { } types && types.TryGetValue(name, out var t) ? t : null;
 
     static MetadataProperty? FindProperty(MetadataType type, string name) => type.Properties.FirstOrDefault(p => p.Name == name);
+
+    /// <summary>
+    /// A type of the project itself that the metadata does not list: internal types (usable from the project's own
+    /// XAML) are missing from metadata read from the built assembly.
+    /// </summary>
+    bool InCompilation(string ns, string name)
+    {
+        if (_compilation == null)
+            return false;
+        var m = Regex.Match(ns, @"^(?:using:|clr-namespace:)([^;]+)");
+        if (!m.Success)
+            return false;
+        var type = _compilation.GetTypeByMetadataName($"{m.Groups[1].Value.Trim()}.{name}");
+        return type != null && (SymbolEqualityComparer.Default.Equals(type.ContainingAssembly, _compilation.Assembly) || type.DeclaredAccessibility == Accessibility.Public);
+    }
+
+    static bool IsBindingType(MetadataType? type) =>
+        type?.FullName is "Avalonia.Data.IBinding" or "Avalonia.Data.BindingBase" or "Avalonia.Data.Binding"
+            or "Avalonia.Data.MultiBinding" or "Avalonia.Markup.Xaml.MarkupExtensions.CompiledBindingExtension";
+
+    /// <summary>
+    /// The XAML compiler also accepts an attached property with only a "NameProperty" field and a "SetName"
+    /// accessor (e.g. a getter named differently), which the metadata does not list; ask the compilation.
+    /// </summary>
+    bool HasAvaloniaProperty(MetadataType owner, string name)
+    {
+        if (_compilation == null || string.IsNullOrEmpty(owner.FullName))
+            return false;
+        for (INamedTypeSymbol? t = _compilation.GetTypeByMetadataName(owner.FullName); t != null; t = t.BaseType)
+            if (t.GetMembers(name + "Property").Any(m => m.IsStatic) || t.GetMembers("Set" + name).Any(m => m.IsStatic))
+                return true;
+        return false;
+    }
     static MetadataEvent? FindEvent(MetadataType type, string name) => type.Events.FirstOrDefault(e => e.Name == name);
 
     static IEnumerable<ISymbol> AllMembers(INamedTypeSymbol type)

@@ -41,3 +41,30 @@ export class FrameRateLimiter {
 		return Math.round(this.last - now);
 	}
 }
+
+/** Cheap brightness estimate from 64 pixels (RGBA). */
+export function sampleLuminance(data: Uint8Array): number {
+	const pixels = Math.floor(data.length / 4);
+	if (!pixels) {
+		return 0;
+	}
+	let sum = 0;
+	for (let i = 0; i < 64; i++) {
+		const p = Math.floor((i * pixels) / 64) * 4;
+		sum += (data[p] + data[p + 1] + data[p + 2]) / 3;
+	}
+	return Math.round(sum / 64);
+}
+
+/** Average alpha of 64 sampled pixels (RGBA): 0 for a frame the designer never painted. */
+export function sampleAlpha(data: Uint8Array): number {
+	const pixels = Math.floor(data.length / 4);
+	if (!pixels) {
+		return 0;
+	}
+	let sum = 0;
+	for (let i = 0; i < 64; i++) {
+		sum += data[Math.floor((i * pixels) / 64) * 4 + 3];
+	}
+	return Math.round(sum / 64);
+}
