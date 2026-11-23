@@ -331,6 +331,9 @@
     "configurationDefaults": {
       "explorer.fileNesting.patterns": {
         "*.axaml": "${capture}.axaml.cs, ${capture}.axaml.fs"
+      },
+      "[AXAML]": {
+        "editor.defaultFormatter": "AvaloniaCommunity.vscode-avalonia-community"
       }
     },
     "keybindings": [

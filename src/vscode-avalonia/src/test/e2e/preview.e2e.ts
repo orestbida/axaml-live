@@ -396,7 +396,7 @@ suite("Avalonia previewer (e2e)", () => {
 			const xaml = fs.readFileSync(created.fsPath, "utf8");
 			const ns = /namespace\s+([\w.]+)/.exec(cs)?.[1];
 			console.log(`[e2e] new item namespace: ${ns}, x:Class: ${/x:Class="([^"]+)"/.exec(xaml)?.[1]}`);
-			assert.ok(ns?.endsWith(".Views") || /x:Class="[w.]*.Views.E2eUserControl"/.test(xaml), `unexpected namespace ${ns}`);
+			assert.ok(ns?.endsWith(".Views") || /x:Class="[\w.]*\.Views\.E2eUserControl"/.test(xaml), `unexpected namespace ${ns}`);
 			// the preview follows the new file; build so its code-behind exists, then it must render without errors
 			await waitFor("preview follows new file", (s) => !!s.panelState?.message?.includes("E2eUserControl.axaml") || s.panelState?.status === "starting", 30000);
 			const started = (await state()).sessionsStarted;
@@ -459,16 +459,14 @@ suite("Avalonia previewer (e2e)", () => {
 			await config.update("attributeWrapThreshold", 1, vscode.ConfigurationTarget.Global);
 			// mess up indentation
 			await editor.edit((e) => e.replace(new vscode.Range(editor.document.positionAt(0), editor.document.positionAt(original.length)), original.replace(/^\s+/gm, "")));
-			const edits = await vscode.commands.executeCommand<vscode.TextEdit[]>("vscode.executeFormatDocumentProvider", editor.document.uri, { tabSize: 4, insertSpaces: true });
-			assert.ok(edits && edits.length > 0, "no formatting edits");
-			const we = new vscode.WorkspaceEdit();
-			we.set(editor.document.uri, edits);
-			await vscode.workspace.applyEdit(we);
+			// the real "Format Document" action: uses the default formatter for AXAML (other extensions may also format XAML)
+			editor.options = { tabSize: 4, insertSpaces: true };
+			await vscode.commands.executeCommand("editor.action.formatDocument");
 			const formatted = editor.document.getText();
 			assert.match(formatted, /\n    <[A-Za-z]/, "children indented");
 			assert.match(formatted, /<Window xmlns="[^"]+"\r?\n\s+xmlns:/, "attributes wrapped over the threshold");
-			const again = await vscode.commands.executeCommand<vscode.TextEdit[]>("vscode.executeFormatDocumentProvider", editor.document.uri, { tabSize: 4, insertSpaces: true });
-			assert.ok(!again || again.length === 0 || again.every((e) => editor.document.getText(e.range) === e.newText), "formatting is idempotent");
+			await vscode.commands.executeCommand("editor.action.formatDocument");
+			assert.strictEqual(editor.document.getText(), formatted, "formatting is idempotent");
 		} finally {
 			await config.update("attributeWrapThreshold", undefined, vscode.ConfigurationTarget.Global);
 			await editor.edit((e) => e.replace(new vscode.Range(editor.document.positionAt(0), editor.document.positionAt(editor.document.getText().length)), original));
