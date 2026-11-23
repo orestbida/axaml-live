@@ -2,6 +2,10 @@
 
 All notable changes to AXAML Live are documented in this file.
 
+## [0.1.1] - 24 November 2026
+
+- New extension icon.
+
 ## [0.1.0] - 24 November 2026
 
 First release of AXAML Live, based on the archived AvaloniaVSCode extension (last release 0.0.27). Issue numbers
