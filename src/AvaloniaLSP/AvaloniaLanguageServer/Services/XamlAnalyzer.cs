@@ -88,7 +88,9 @@ public sealed class XamlAnalyzer
             {
                 if (a.Prefix == "xmlns" || (a.Prefix == "" && a.LocalName == "xmlns") || Skip(a.NamespaceUri) || a.NamespaceUri == "http://www.w3.org/XML/1998/namespace")
                     continue;
-                var attrNs = a.Prefix == "" ? el.NamespaceUri : a.NamespaceUri;
+                // unprefixed attached properties (Grid.Row) resolve their owner in the default namespace,
+                // also on prefixed elements (<local:MyControl Grid.Row="1">)
+                var attrNs = a.Prefix == "" ? el.Namespaces.GetValueOrDefault("", el.NamespaceUri) : a.NamespaceUri;
                 if (a.LocalName.Contains('.'))
                 {
                     var dot = a.LocalName.IndexOf('.');
@@ -182,7 +184,7 @@ public sealed class XamlAnalyzer
 
     XamlSymbol? AttributeSymbol(XamlElement el, XamlAttribute a)
     {
-        var ns = a.Prefix == "" ? el.NamespaceUri : a.NamespaceUri;
+        var ns = a.Prefix == "" ? el.Namespaces.GetValueOrDefault("", el.NamespaceUri) : a.NamespaceUri;
         MetadataType? owner;
         string name;
         bool attached = a.LocalName.Contains('.');
@@ -267,8 +269,15 @@ public sealed class XamlAnalyzer
         for (var e = el; e != null; e = e.Parent)
         {
             var dt = e.Attributes.FirstOrDefault(a => a.NamespaceUri == XamlDocument.XamlNamespace && a.LocalName == "DataType");
+            // data templates also take a plain DataType="..." (Avalonia uses it for compiled bindings)
+            var isTemplate = !e.IsPropertyElement && e.LocalName.EndsWith("Template", StringComparison.Ordinal);
+            if (dt == null && isTemplate)
+                dt = e.Attributes.FirstOrDefault(a => a.Prefix == "" && a.LocalName == "DataType");
             if (dt != null)
                 return ResolveTypeFullName(dt.Value, e);
+            // the data context of a template without a type is unknown (items, content): do not validate
+            if (isTemplate && e != el)
+                return null;
         }
         return null;
     }

@@ -54,6 +54,8 @@ async function main() {
 				E2E_SCREENSHOT_DIR: process.env.E2E_SCREENSHOT_DIR,
 				E2E_PAUSE_MS: process.env.E2E_PAUSE_MS,
 				E2E_GREP: process.env.E2E_GREP,
+				E2E_SUITE: process.env.E2E_SUITE,
+				E2E_REPORT: process.env.E2E_REPORT,
 			},
 			launchArgs: [
 				...workspaceArgs,

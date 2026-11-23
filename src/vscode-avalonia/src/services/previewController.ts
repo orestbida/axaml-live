@@ -48,6 +48,7 @@ export class PreviewController implements vscode.Disposable {
 	private _editTimer: NodeJS.Timeout | undefined;
 	private _generation = 0;
 	private _lastXaml: XamlResult | undefined;
+	private _xamlResults = 0;
 	private _restarts = 0;
 	private readonly _disposables: vscode.Disposable[] = [];
 	private readonly _diagnostics = vscode.languages.createDiagnosticCollection("Avalonia Previewer");
@@ -440,6 +441,7 @@ export class PreviewController implements vscode.Disposable {
 
 	private onXamlResult(r: XamlResult) {
 		this._lastXaml = r;
+		this._xamlResults++;
 		const file = this._file;
 		if (!file) {
 			return;
@@ -590,6 +592,7 @@ export class PreviewController implements vscode.Disposable {
 			previewerPid: this._session?.pid,
 			sessionsStarted: this._restarts,
 			lastXaml: this._lastXaml,
+			xamlResults: this._xamlResults,
 			building: !!this._building,
 			preview: {
 				frames: this._frames,

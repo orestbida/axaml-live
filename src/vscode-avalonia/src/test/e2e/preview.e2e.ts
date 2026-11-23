@@ -629,6 +629,23 @@ suite("Avalonia previewer (e2e)", () => {
         <Button Contnet="x"/>
         <TextBlock Text="{Binding Greting}"/>
         <TextBlock Text="{Binding E2eGenerated}"/>
+        <ItemsControl>
+            <ItemsControl.ItemTemplate>
+                <DataTemplate DataType="vm:${vmName()}">
+                    <TextBlock Text="{Binding Greeting}"/>
+                </DataTemplate>
+            </ItemsControl.ItemTemplate>
+        </ItemsControl>
+        <ItemsControl>
+            <ItemsControl.ItemTemplate>
+                <DataTemplate>
+                    <TextBlock Text="{Binding ItemOnlyProperty}"/>
+                </DataTemplate>
+            </ItemsControl.ItemTemplate>
+        </ItemsControl>
+        <Grid>
+            <vm:${vmName()} Grid.Row="1"/>
+        </Grid>
     </StackPanel>
 </UserControl>
 `
@@ -641,6 +658,11 @@ suite("Avalonia previewer (e2e)", () => {
 		console.log(`[e2e] diagnostics: ${diags.map((d) => `${d.range.start.line + 1}: ${d.message}`).join(" | ")}`);
 		assert.ok(!diags.some((d) => d.message.includes("'Greeting'")), "valid binding reported");
 		assert.ok(!diags.some((d) => /StackPanel|UserControl/.test(d.message)), "valid elements reported");
+		// DataTemplate DataType="..." (no x:) sets the binding scope; templates without a type are not validated
+		assert.ok(!diags.some((d) => d.message.includes("ItemOnlyProperty")), "binding inside an untyped DataTemplate reported");
+		assert.strictEqual(diags.filter((d) => d.message.includes("'Greeting'")).length, 0, "binding inside DataTemplate DataType reported");
+		// an unprefixed attached property on a prefixed element is resolved in the default namespace
+		assert.ok(!diags.some((d) => d.message.includes("Type 'Grid' not found")), "Grid.Row on a prefixed element reported");
 		const buton = diags.find((d) => d.message.includes("Buton"))!;
 		assert.strictEqual(lspDoc.getText(buton.range), "Buton");
 		await checkpoint("lsp-diagnostics");
