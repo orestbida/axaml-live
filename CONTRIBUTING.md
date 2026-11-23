@@ -21,16 +21,10 @@ Welcome to Avalonia Extension for VS Code! We appreciate your interest in contri
 
 ## Set up
 
-1. Fork and Clone the repository
+1. Fork and clone the repository (no submodules: the completion engine and the solution parser are vendored,
+   see `src/AvaloniaVS/VENDORED.md` and `src/SolutionParser/VENDORED.md`)
 
-    `git clone --recursive https://github.com/AvaloniaUI/AvaloniaVSCode`
-
-2. Update submodules
-This extension uses git submodules to pull in the Solution Parser and the Avalonia Visual Studio repo. Run the following to pull in the submodules:
-
-    `git submodule update --init --recursive`
-
-3. Run the `build.sh`, currently repo does not have build script for Windows
+2. Run `build.sh` (on Windows from Git Bash)
 
 ## How to contribute
 
@@ -53,3 +47,20 @@ npm install -g @vscode/vsce
 1. Open command palette (shift + cmd + p)
 2. Select `Task: Run Task`
 3. Select `Package Extension`
+
+## End-to-end tests
+
+`src/vscode-avalonia/src/test/e2e` drives a real, visible VS Code window against an Avalonia project:
+show preview (auto build), live edit, XAML error reporting, external `dotnet build` while previewing, Build/Restart
+commands, code completion (also after a rebuild), switching files and closing the preview.
+
+```bash
+cd src/vscode-avalonia
+yarn compile
+dotnet new avalonia.mvvm -o /tmp/E2EApp
+node out/test/e2e/runE2E.js /tmp/E2EApp "<path to Code executable>"
+```
+
+Optional environment variables: `E2E_AXAML` (file to preview, default `MainWindow.axaml`), `E2E_BUILD_TARGET`
+(project for the external build, e.g. the Desktop head of an xplat solution), `E2E_PAUSE_MS`,
+`E2E_SCREENSHOT_DIR` (Windows: desktop screenshot per checkpoint).
