@@ -2,7 +2,7 @@
   "name": "axaml-live",
   "displayName": "AXAML Live",
   "description": "Live preview, completion, diagnostics and formatting for Avalonia XAML (.axaml) files. Community project, not affiliated with AvaloniaUI.",
-  "publisher": "your-publisher-id",
+  "publisher": "OrestBida",
   "version": "0.2.0",
   "license": "MIT",
   "qna": "false",
@@ -358,7 +358,7 @@
         "*.axaml": "${capture}.axaml.cs, ${capture}.axaml.fs"
       },
       "[AXAML]": {
-        "editor.defaultFormatter": "your-publisher-id.axaml-live"
+        "editor.defaultFormatter": "OrestBida.axaml-live"
       }
     },
     "keybindings": [

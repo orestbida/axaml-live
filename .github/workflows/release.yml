@@ -2,8 +2,8 @@ name: Release
 
 # Push a tag like v0.2.0 to build the VSIX and attach it to a GitHub release.
 # Publishing to the VS Code Marketplace is a separate, manual step: run this workflow from the Actions tab with
-# "publish" checked. It needs a VSCE_PAT repository secret (a Marketplace personal access token) and the
-# "publisher" field in src/AxamlLive/package.json set to your Marketplace publisher ID.
+# "publish" checked. It uses Marketplace Trusted Publishing (no secret): the publisher needs a Trusted Publishing
+# policy for this repository and the workflow file release.yml.
 
 on:
   push:
@@ -17,6 +17,7 @@ on:
 
 permissions:
   contents: write
+  id-token: write # Marketplace Trusted Publishing
 
 jobs:
   release:
@@ -84,15 +85,4 @@ jobs:
       - name: Publish to the VS Code Marketplace
         if: github.event_name == 'workflow_dispatch' && inputs.publish
         working-directory: src/AxamlLive
-        env:
-          VSCE_PAT: ${{ secrets.VSCE_PAT }}
-        run: |
-          if [ -z "$VSCE_PAT" ]; then
-            echo "The VSCE_PAT secret is not set."
-            exit 1
-          fi
-          if [ "$(node -p "require('./package.json').publisher")" = "your-publisher-id" ]; then
-            echo "Set the publisher field in package.json to your Marketplace publisher ID first."
-            exit 1
-          fi
-          npx --yes @vscode/vsce publish --packagePath ../../axaml-live-*.vsix
+        run: npx --yes @vscode/vsce publish --oidc --packagePath ../../axaml-live-*.vsix

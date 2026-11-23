@@ -109,15 +109,13 @@ Project**, **Install / Update Avalonia Project Templates**, **Select solution**,
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for development. To release:
 
-1. Set `publisher` in `src/AxamlLive/package.json` to your Marketplace publisher ID (create one at
-   https://marketplace.visualstudio.com/manage), and use the same ID in `editor.defaultFormatter` under
-   `configurationDefaults` (`<publisher>.axaml-live`). The release workflow checks that they match.
-2. On GitHub, make the branch you release from the default branch: links in the Marketplace page point to the
-   default branch.
+1. The publisher ID is set in `src/AxamlLive/package.json` (`publisher`, and `editor.defaultFormatter` under
+   `configurationDefaults` as `<publisher>.axaml-live`). The release workflow checks that they match.
+2. Once, on https://marketplace.visualstudio.com/manage: open the publisher, **Trusted Publishing**, and add a policy for
+   the GitHub repository `orestbida/axaml-live` and the workflow file `release.yml`. No token or secret is needed.
 3. Update `version` in `package.json` and `CHANGELOG.md`, commit, and push a tag like `v0.2.0`. GitHub Actions builds
    the VSIX and attaches it to a GitHub release.
-4. To publish to the Marketplace, add a `VSCE_PAT` secret to the repository and run the **Release** workflow from the
-   Actions tab with **publish** checked.
+4. To publish to the Marketplace, run the **Release** workflow from the Actions tab with **publish** checked.
 
 ## Trademarks
 
