@@ -10,13 +10,11 @@ under MIT.
 
 ## Requirements
 
-| What | Version | Why |
-|---|---|---|
-| Visual Studio Code | 1.79 or newer | |
-| .NET SDK | 8.0 or newer, the version your project needs | to build your app; the previewer runs your app's build output |
-| .NET runtime | 10.0 or newer | for the language server (completion, diagnostics, hover). If it is missing, it is downloaded for you by the .NET Install Tool extension, which is installed automatically |
-| Avalonia | 11.x or 12.x | in your project, as NuGet packages or built from source |
-| Operating system | Windows, Linux or macOS (x64 or arm64) | also works in Remote - WSL, Remote - SSH, Dev Containers and Codespaces |
+- Visual Studio Code 1.79 or newer
+- .NET SDK 8.0 or newer, matching your project
+- .NET 10 runtime for the language server. If it is missing, the .NET Install Tool extension downloads it.
+- Avalonia 11 or 12
+- Windows, Linux or macOS (x64 or arm64). Remote - WSL, Remote - SSH, Dev Containers and Codespaces are supported.
 
 Optional: the C# extension (`ms-dotnettools.csharp`) to **Run / Debug** with the debugger. Without it the project is
 started in a terminal.
