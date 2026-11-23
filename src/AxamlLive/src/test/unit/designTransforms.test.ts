@@ -51,11 +51,24 @@ suite("design transforms: theme variant", () => {
 
     test("UserControl content is wrapped in a ThemeVariantScope, property elements stay direct children", () => {
         const out = applyThemeVariant(userControlXaml, "Dark");
-        assert.match(
-            out,
-            /<UserControl\.Styles>[\s\S]*<\/UserControl\.Styles>\s*<ThemeVariantScope RequestedThemeVariant="Dark">\s*<StackPanel>/
-        );
-        assert.match(out, /<\/StackPanel>\s*<\/ThemeVariantScope>\s*<\/UserControl>/);
+        assert.match(out, /<UserControl\.Styles>[\s\S]*<\/UserControl\.Styles>\s*<ThemeVariantScope RequestedThemeVariant="Dark">/);
+        assert.match(out, /<StackPanel>[\s\S]*<\/StackPanel>\s*(<\/Border>)*\s*<\/ThemeVariantScope>\s*<\/UserControl>/);
+    });
+
+    test("UserControl gets the window background of the chosen theme (Simple, Fluent and Fluent 2 brushes)", () => {
+        const out = applyThemeVariant(userControlXaml, "Dark");
+        const open =
+            '<ThemeVariantScope RequestedThemeVariant="Dark"><Border Background="{DynamicResource ThemeBackgroundBrush}">' +
+            '<Border Background="{DynamicResource SystemRegionBrush}"><Border Background="{DynamicResource SolidBackgroundFillColorBase}">';
+        assert.ok(out.includes(open), out);
+        assert.match(out, /<\/StackPanel>\s*<\/Border><\/Border><\/Border><\/ThemeVariantScope>/);
+    });
+
+    test("a view with its own background keeps it (no theme background on top)", () => {
+        const own = userControlXaml.replace("<UserControl ", '<UserControl Background="#202020" ');
+        const out = applyThemeVariant(own, "Dark");
+        assert.ok(out.includes('<ThemeVariantScope RequestedThemeVariant="Dark">'));
+        assert.ok(!out.includes("SystemRegionBrush"));
     });
 
     test("Styles: Design.PreviewWith content is wrapped", () => {

@@ -28,7 +28,12 @@ export function applyThemeVariant(xaml: string, variant: ThemeVariant | string):
         rootName === "Styles" || rootName === "ResourceDictionary"
             ? root.children.find((c): c is XmlElement => c.kind === "element" && c.name === "Design.PreviewWith")
             : undefined;
-    return wrapContent(xaml, previewWith ?? root, variant);
+    // the designer window keeps the app theme's background: a view without its own background gets the window
+    // background of the chosen theme (Simple, Fluent and Fluent 2 name that brush differently; a missing one is empty)
+    const hasBackground =
+        root.attributes.some((a) => a.name === "Background") ||
+        root.children.some((c) => c.kind === "element" && c.name === `${root.name}.Background`);
+    return wrapContent(xaml, previewWith ?? root, variant, !previewWith && !hasBackground);
 }
 
 export function applyDesignSize(xaml: string, width: number, height: number): string {
@@ -123,7 +128,7 @@ function setRootAttribute(xaml: string, root: XmlElement, name: string, value: s
 }
 
 /** Wraps the content (not property elements like `UserControl.Styles`) of `el` in a ThemeVariantScope. */
-function wrapContent(xaml: string, el: XmlElement, variant: string): string {
+function wrapContent(xaml: string, el: XmlElement, variant: string, themeBackground = false): string {
     const content = el.children.filter(
         (c) => (c.kind === "element" && !localName(c.name).includes(".")) || (c.kind === "text" && c.raw.trim() !== "")
     );
@@ -132,9 +137,14 @@ function wrapContent(xaml: string, el: XmlElement, variant: string): string {
     }
     const start = content[0].start;
     const end = content[content.length - 1].end;
+    const open = themeBackground
+        ? '<Border Background="{DynamicResource ThemeBackgroundBrush}"><Border Background="{DynamicResource SystemRegionBrush}">' +
+          '<Border Background="{DynamicResource SolidBackgroundFillColorBase}">'
+        : "";
+    const close = themeBackground ? "</Border></Border></Border>" : "";
     return applyEdits(xaml, [
-        { start: end, end, text: "</ThemeVariantScope>" },
-        { start, end: start, text: `<ThemeVariantScope RequestedThemeVariant="${variant}">` },
+        { start: end, end, text: `${close}</ThemeVariantScope>` },
+        { start, end: start, text: `<ThemeVariantScope RequestedThemeVariant="${variant}">${open}` },
     ]);
 }
 
