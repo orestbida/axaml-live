@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import * as path from "path";
+import * as os from "os";
 import * as fs from "fs-extra";
 import { spawn } from "child_process";
 
@@ -12,7 +13,7 @@ import { Messages, mapKey } from "./messageParser";
 import { averageLuminance, sampleAlpha, sampleLuminance } from "./frameStats";
 import { CrashGuard } from "./crashInfo";
 import { missingSdk } from "./parserOutput";
-import { applyDesignDataContext, applyDesignSize, applyThemeVariant } from "../xaml/designTransforms";
+import { applyDesignDataContext, applyDesignSize, applyThemeVariant, designDataHint } from "../xaml/designTransforms";
 import { formFactors, resolveFormFactor } from "../xaml/formFactors";
 
 interface ViewInfo {
@@ -67,7 +68,7 @@ export class PreviewController implements vscode.Disposable {
 	/** The last update carried an automatic Design.DataContext (see applyDesignDataContext). */
 	private _pushedDesignDataContext = false;
 	/** Files whose x:DataType could not be constructed by the designer; cleared when the previewer restarts. */
-	private readonly _designDataContextFailed = new Set<string>();
+	private readonly _designDataContextFailed = new Map<string, string>(); // file -> hint for the panel
 	private _restarts = 0;
 	private readonly _disposables: vscode.Disposable[] = [];
 	private readonly _diagnostics = vscode.languages.createDiagnosticCollection("Avalonia Previewer");
@@ -530,7 +531,7 @@ export class PreviewController implements vscode.Disposable {
 		if (file && error && this._pushedDesignDataContext) {
 			// the x:DataType could not be constructed at design time: preview without it
 			logger.info(`Preview without automatic design data context for ${path.basename(file.fsPath)}: ${error.split("\n")[0]}`);
-			this._designDataContextFailed.add(file.fsPath);
+			this._designDataContextFailed.set(file.fsPath, designDataHint(error));
 			this.pushXaml();
 			return;
 		}
@@ -543,6 +544,10 @@ export class PreviewController implements vscode.Disposable {
 		this._panel?.setXaml(error ? { error: (r.exceptionType ? `${r.exceptionType}: ` : "") + error, line: r.line } : {});
 		if (!error) {
 			this._diagnostics.delete(file);
+			const hint = this._designDataContextFailed.get(file.fsPath);
+			if (hint && this._session) {
+				this._panel?.setState({ status: "ready", message: `${this._session.project.name} · ${path.basename(file.fsPath)} · ${hint}` });
+			}
 			this.checkRendered(file, this._frames);
 			return;
 		}
@@ -586,12 +591,17 @@ export class PreviewController implements vscode.Disposable {
 		if (current && fileInfo && !samePath(fileInfo.projectPath, project.path) && !sln.isProjectReferencedBy(current, project, fileInfo.projectPath)) {
 			targets.unshift(fileInfo.projectPath);
 		}
+		// Avalonia built from source (project references): the designer host is a project of the solution too
+		const hostProject = current?.projects.find((p) => project.designerHostPath && samePath(p.targetPath, project.designerHostPath));
+		if (hostProject && !fs.existsSync(project.designerHostPath) && !targets.some((t) => samePath(t, hostProject.path))) {
+			targets.unshift(hostProject.path);
+		}
 
 		let result: BuildResult = { ok: true, errors: "", tail: "" };
 		for (const target of targets) {
 			result = await vscode.window.withProgress(
 				{ location: vscode.ProgressLocation.Window, title: `Avalonia: building ${path.basename(target)}` },
-				() => dotnetBuild(target)
+				() => dotnetBuild(target, this._context.workspaceState.get<boolean>(ignoreGlobalJsonKey, false))
 			);
 			if (!result.ok) {
 				break;
@@ -606,8 +616,15 @@ export class PreviewController implements vscode.Disposable {
 			this.showError(msg, `Install .NET SDK ${sdk.version} (${sdk.downloadUrl}) or change ${sdk.globalJson ?? "global.json"}. Projects that are already built can still be previewed.`, true);
 			const download = "Download .NET SDK";
 			const open = "Open global.json";
-			vscode.window.showErrorMessage(msg, download, ...(sdk.globalJson ? [open] : [])).then((r) => {
-				if (r === download) {
+			const anyway = "Build with installed SDK";
+			vscode.window.showErrorMessage(msg, anyway, download, ...(sdk.globalJson ? [open] : [])).then(async (r) => {
+				if (r === anyway) {
+					// remembered for this workspace; builds then run outside the folder that has the global.json
+					await this._context.workspaceState.update(ignoreGlobalJsonKey, true);
+					if (await this.build(project)) {
+						this._file && this.setFile(this._file);
+					}
+				} else if (r === download) {
 					vscode.env.openExternal(vscode.Uri.parse(sdk.downloadUrl));
 				} else if (r === open && sdk.globalJson) {
 					vscode.window.showTextDocument(vscode.Uri.file(sdk.globalJson));
@@ -705,6 +722,8 @@ export class PreviewController implements vscode.Disposable {
 			designDataContext: this._pushedDesignDataContext,
 			crashes: this._crashes,
 			stalls: this._stalls,
+			framesDrawn: this._panel?.framesDrawn ?? 0,
+			sent: this._panel ? { ...this._panel.sent } : undefined,
 			trace: [...this._trace],
 			sessionTrace: [...(this._session?.trace ?? [])],
 			lastCrash: this._lastCrash,
@@ -740,6 +759,8 @@ export class PreviewController implements vscode.Disposable {
 	}
 }
 
+const ignoreGlobalJsonKey = "avalonia.build.ignoreGlobalJson";
+
 export interface BuildResult {
 	ok: boolean;
 	errors: string;
@@ -747,13 +768,17 @@ export interface BuildResult {
 	output?: string;
 }
 
-export function dotnetBuild(projectPath: string): Promise<BuildResult> {
+/**
+ * ignoreGlobalJson: run from outside the repository, so a global.json that pins a missing SDK does not apply and the
+ * newest installed SDK builds (the user chose this when the pinned SDK is not installed).
+ */
+export function dotnetBuild(projectPath: string, ignoreGlobalJson = false): Promise<BuildResult> {
 	return new Promise((resolve) => {
 		logger.info(`dotnet build "${projectPath}"`);
 		const lines: string[] = [];
 		const errors = new Set<string>();
 		const proc = spawn("dotnet", ["build", projectPath, "-nologo", "-v", "q", "-clp:NoSummary"], {
-			cwd: path.dirname(projectPath),
+			cwd: ignoreGlobalJson ? os.tmpdir() : path.dirname(projectPath),
 			env: { ...process.env, DOTNET_CLI_UI_LANGUAGE: "en" },
 		});
 		const onData = (d: Buffer) => {

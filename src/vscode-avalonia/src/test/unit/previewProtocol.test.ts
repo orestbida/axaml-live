@@ -1,7 +1,8 @@
 import * as assert from "assert";
 import { BSON } from "bson";
 import { Messages, MessageReader, InputModifier, mapKey } from "../../services/messageParser";
-import { averageLuminance, FrameRateLimiter, sampleAlpha } from "../../services/frameStats";
+import { averageLuminance, changedRect, cropRows, FrameRateLimiter, sampleAlpha } from "../../services/frameStats";
+import { designTimeConfigProperties } from "../../services/runtimeConfig";
 
 suite("preview protocol messages", () => {
 	test("render info DPI is serialized as BSON double (the designer rejects int32)", () => {
@@ -123,5 +124,58 @@ suite("frame transparency", () => {
 		const rendered = new Uint8Array(98 * 91 * 4).fill(255);
 		assert.strictEqual(sampleAlpha(rendered), 255);
 		assert.strictEqual(sampleAlpha(new Uint8Array(0)), 0);
+	});
+});
+
+suite("frame deltas", () => {
+	const frame = (w: number, h: number, fill = 0) => new Uint8Array(w * h * 4).fill(fill);
+
+	test("identical frames: nothing changed", () => {
+		assert.strictEqual(changedRect(frame(10, 8, 1), frame(10, 8, 1), 10, 8), undefined);
+	});
+
+	test("bounding box of the changed pixels", () => {
+		const a = frame(10, 8);
+		const b = frame(10, 8);
+		b[(2 * 10 + 3) * 4] = 9; // pixel (3,2)
+		b[(5 * 10 + 7) * 4 + 2] = 9; // pixel (7,5)
+		assert.deepStrictEqual(changedRect(a, b, 10, 8), { x: 3, y: 2, width: 5, height: 4 });
+	});
+
+	test("crop copies the rectangle row by row", () => {
+		const b = frame(4, 3);
+		for (let i = 0; i < b.length; i++) {
+			b[i] = i % 251;
+		}
+		const r = cropRows(b, 4, { x: 1, y: 1, width: 2, height: 2 });
+		assert.strictEqual(r.length, 2 * 2 * 4);
+		assert.deepStrictEqual([...r.subarray(0, 8)], [...b.subarray((1 * 4 + 1) * 4, (1 * 4 + 3) * 4)]);
+		assert.deepStrictEqual([...r.subarray(8, 16)], [...b.subarray((2 * 4 + 1) * 4, (2 * 4 + 3) * 4)]);
+	});
+
+	test("a 1000x700 diff is fast", () => {
+		const a = frame(1000, 700);
+		const b = frame(1000, 700);
+		b[b.length - 1] = 1;
+		const t0 = Date.now();
+		for (let i = 0; i < 10; i++) {
+			changedRect(a, b, 1000, 700);
+		}
+		assert.ok(Date.now() - t0 < 200, `${Date.now() - t0} ms for 10 diffs`);
+	});
+});
+
+/* eslint-disable @typescript-eslint/naming-convention -- .NET runtimeconfig keys */
+suite("design-time runtimeconfig", () => {
+	test("drops trimming/AOT switches the designer needs, keeps the rest", () => {
+		const props: Record<string, unknown> = {
+			"System.Runtime.CompilerServices.RuntimeFeature.IsDynamicCodeSupported": false,
+			"System.Text.Json.JsonSerializer.IsReflectionEnabledByDefault": false,
+			"System.Resources.UseSystemResourceKeys": true,
+			"System.Globalization.Invariant": true,
+		};
+		assert.strictEqual(designTimeConfigProperties(props), true);
+		assert.deepStrictEqual(props, { "System.Globalization.Invariant": true });
+		assert.strictEqual(designTimeConfigProperties(props), false);
 	});
 });

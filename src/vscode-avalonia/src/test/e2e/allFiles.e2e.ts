@@ -15,6 +15,7 @@ const reportFile = e2eSetting("E2E_REPORT");
 const pauseMs = Number(e2eSetting("E2E_PAUSE_MS") ?? 1500);
 const include = e2eSetting("E2E_INCLUDE"); // regex on the workspace-relative path (forward slashes)
 const screenshotAll = e2eSetting("E2E_SCREENSHOT_ALL") === "1";
+const extensions = (e2eSetting("E2E_EXT") ?? ".axaml").split(",").map((e) => e.trim().toLowerCase()); // e.g. ".axaml,.xaml"
 
 const state = async () => (await vscode.commands.executeCommand<any>("avalonia.debug.state"))!;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -44,7 +45,7 @@ function axamlFiles(dir: string): string[] {
 		const p = path.join(dir, e.name);
 		if (e.isDirectory() && !["bin", "obj", ".git", "node_modules"].includes(e.name)) {
 			out.push(...axamlFiles(p));
-		} else if (e.isFile() && e.name.endsWith(".axaml")) {
+		} else if (e.isFile() && extensions.includes(path.extname(e.name).toLowerCase())) {
 			out.push(p);
 		}
 	}
@@ -60,6 +61,7 @@ interface FileReport {
 	blank?: boolean;
 	designDataContext?: boolean;
 	crash?: string;
+	language?: string;
 	diagnostics: string[];
 }
 
@@ -76,6 +78,7 @@ suite("All AXAML files (read-only)", () => {
 			console.log(`[report] ${r.ok ? "OK  " : "FAIL"} ${r.file}` +
 				(r.frame ? ` ${r.frame.logicalWidth}x${r.frame.logicalHeight} lum=${r.frame.avgLum}${r.blank ? " (blank)" : ""}` : " (no frame)") +
 				(r.designDataContext ? " [design data]" : "") +
+				(r.language && r.language !== "AXAML" ? ` [language ${r.language}]` : "") +
 				(r.previewError ? ` | preview: ${r.previewError}` : "") +
 				(r.crash ? ` | ${r.crash}` : "") +
 				(r.diagnostics.length ? ` | diagnostics: ${r.diagnostics.join(" ; ")}` : ""));
@@ -112,6 +115,7 @@ suite("All AXAML files (read-only)", () => {
 				diagnostics: diags.map((d) => `${d.source} ${d.range.start.line + 1}: ${d.message}`),
 			};
 			r.designDataContext = !!after.designDataContext;
+			r.language = vscode.workspace.textDocuments.find((d) => d.uri.toString() === doc.uri.toString())?.languageId;
 			if ((after.crashes ?? 0) > (before.crashes ?? 0)) {
 				// the designer crashed (user code at design time, e.g. OnLoaded); the crash can surface while the next
 				// file loads, so blame the file named in the crash when there is one

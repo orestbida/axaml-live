@@ -69,7 +69,7 @@ export class StyleBadges implements vscode.Disposable {
 
 	private update() {
 		const editor = vscode.window.activeTextEditor;
-		if (!editor || !/\.axaml$/i.test(editor.document.fileName)) {
+		if (!editor || !(/\.axaml$/i.test(editor.document.fileName) || editor.document.languageId === "AXAML")) {
 			this.count = 0;
 			return;
 		}

@@ -5,7 +5,7 @@ import { registerAvaloniaCommands } from "./commands";
 import { CommandManager } from "./commandManager";
 import { logger } from "./util/Utilities";
 import { AppConstants } from "./util/Utilities";
-import { initSolutionService, buildSolutionModel } from "./services/solutionParser";
+import { initSolutionService, buildSolutionModel, isAvaloniaXamlFile } from "./services/solutionParser";
 import { PreviewController } from "./services/previewController";
 import { registerFormatter, StyleBadges } from "./features/editorFeatures";
 
@@ -65,8 +65,19 @@ export async function activate(context: vscode.ExtensionContext) {
 	projectWatcher.onDidDelete(reparse);
 	context.subscriptions.push(projectWatcher);
 
+	// .xaml files of Avalonia projects (older projects, the Avalonia repository) get the AXAML language: preview,
+	// language server, formatter. Only files the solution lists as AvaloniaXaml, so WPF/MAUI .xaml stay untouched.
+	const adoptXaml = (doc: vscode.TextDocument) => {
+		if (doc.languageId !== "AXAML" && doc.uri.scheme === "file" && /\.xaml$/i.test(doc.fileName) && isAvaloniaXamlFile(doc.uri.fsPath)) {
+			vscode.languages.setTextDocumentLanguage(doc, "AXAML").then(undefined, (e) => logger.warn(`${e}`));
+		}
+	};
+	context.subscriptions.push(vscode.workspace.onDidOpenTextDocument(adoptXaml));
+
 	// parse once at startup so completion works without pressing Build when the project is already built (#152)
-	buildSolutionModel().catch((e) => logger.error(`Failed to parse solution: ${e}`));
+	buildSolutionModel()
+		.then(() => vscode.workspace.textDocuments.forEach(adoptXaml))
+		.catch((e) => logger.error(`Failed to parse solution: ${e}`));
 
 	try {
 		languageClient = await createLanguageService(context);

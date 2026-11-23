@@ -50,3 +50,21 @@ suite("previewer crash guard", () => {
 		assert.strictEqual(g.onCrash("b.axaml"), true);
 	});
 });
+
+suite("previewer crash summary: messages", () => {
+	test("includes the exception message when no user frame is known", () => {
+		assert.strictEqual(
+			summarizeCrash(["Unhandled exception. System.IO.IOException: The pipe is broken.", "   at System.IO.Pipe.Write()"], 134, null),
+			"Previewer crashed: IOException: The pipe is broken."
+		);
+	});
+
+	test("explains a missing BuildAvaloniaApp method", () => {
+		const out = summarizeCrash([
+			"Unhandled exception. System.InvalidOperationException: Unable to create AppBuilder from type \"DrmFps.Program\". Input type either needs to have BuildAvaloniaApp -> AppBuilder method or inherit Application type.",
+			"   at Avalonia.DesignerSupport.Remote.RemoteDesignerEntryPoint.Main(String[] args)",
+		], 134, null);
+		assert.match(out, /DrmFps\.Program has no BuildAvaloniaApp\(\)/);
+		assert.match(out, /public static AppBuilder BuildAvaloniaApp\(\)/);
+	});
+});

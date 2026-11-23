@@ -8,20 +8,28 @@ export function summarizeCrash(log: string[], code: number | null, signal: strin
 	const start = log.findIndex((l) => /Unhandled exception\./.test(l));
 	if (start >= 0) {
 		const rest = log.slice(start);
-		const exception = rest.map((l) => /([\w.]+(?:Exception|Error))\b:/.exec(l)?.[1]).find((x) => x);
+		const thrown = rest.map((l) => /([\w.]+(?:Exception|Error))\b:\s*(.*)/.exec(l)).find((m) => m);
 		const frame = rest
 			.map((l) => /^\s*at ([\w.`<>+]+)\.([\w<>`]+)\([^)]*\)(?: in (.+):line (\d+))?/.exec(l))
 			.find((m) => m && !/^(System|Avalonia|Microsoft)\./.test(m[1]));
-		if (exception) {
-			let where = "";
+		if (thrown) {
+			const exception = thrown[1].split(".").pop();
+			const message = thrown[2].trim();
+			// the designer starts the app through Program.BuildAvaloniaApp(), which apps started differently lack
+			const noBuilder = /Unable to create AppBuilder from type "([^"]+)"/.exec(message);
+			if (noBuilder) {
+				return `Previewer cannot start the app: ${noBuilder[1]} has no BuildAvaloniaApp() method. The designer needs ` +
+					"`public static AppBuilder BuildAvaloniaApp()` returning the configured AppBuilder (Main can call it).";
+			}
 			if (frame) {
 				const type = frame[1].split(".").pop();
-				where = ` in ${type}.${frame[2]}`;
+				let where = ` in ${type}.${frame[2]}`;
 				if (frame[3]) {
 					where += ` (${frame[3].split(/[\\/]/).pop()}:${frame[4]})`;
 				}
+				return `Previewer crashed: ${exception}${where}`;
 			}
-			return `Previewer crashed: ${exception.split(".").pop()}${where}`;
+			return `Previewer crashed: ${exception}${message ? `: ${message.slice(0, 200)}` : ""}`;
 		}
 	}
 	if (code === null && signal) {

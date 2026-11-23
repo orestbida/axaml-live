@@ -20,7 +20,12 @@ Previewer:
 - Large frames: linear message reader, acknowledge before forwarding, one frame in flight to the webview (smooth
   animations in maximized windows).
 - A `global.json` that pins a missing SDK no longer blocks previews: the solution is analyzed with the newest installed
-  SDK; a build explains which SDK to install.
+  SDK; a build explains which SDK to install and can build with the installed SDK instead.
+- Remote sessions (WSL, SSH): only changed pixels are sent, compressed; animations stay smooth (22 → 59 fps over WSL).
+- `.xaml` files of Avalonia projects get the preview and language features.
+- The preview is centered with a margin; phones and tablets get a thin frame instead of a thick bezel.
+- Clear messages when the app has no `BuildAvaloniaApp()` method or a view model cannot be created for design data.
+- Avalonia built from source: the repository's own designer host is built when needed.
 
 Language features:
 

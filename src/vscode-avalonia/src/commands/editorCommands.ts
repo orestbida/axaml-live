@@ -15,7 +15,7 @@ function activeAxaml(uri?: vscode.Uri): vscode.TextDocument | undefined {
 	if (uri && doc?.uri.toString() !== uri.toString()) {
 		return vscode.workspace.textDocuments.find((d) => d.uri.toString() === uri.toString());
 	}
-	return doc && /\.axaml$/i.test(doc.fileName) ? doc : undefined;
+	return doc && (/\.axaml$/i.test(doc.fileName) || doc.languageId === "AXAML") ? doc : undefined;
 }
 
 /** Opens `file` and moves the cursor to the declaration of `typeName` (when found). */

@@ -12,6 +12,7 @@ import { FrameRateLimiter } from "./frameStats";
 import { AppConstants, logger, samePath } from "../util/Utilities";
 import { XamlResult, parseXamlError } from "./xamlError";
 import { summarizeCrash } from "./crashInfo";
+import { designTimeConfigProperties } from "./runtimeConfig";
 
 
 export type SessionState = "starting" | "ready" | "exited";
@@ -459,14 +460,7 @@ async function enableDesignTimeFeatures(runtimeConfigPath: string) {
 		if (!props) {
 			return;
 		}
-		let changed = false;
-		for (const [key, value] of Object.entries(props)) {
-			if (value === false && /\.(IsSupported|IsDynamicCodeSupported|CanEmitObjectArrayDelegate|IsReflectionEnabledByDefault)$/.test(key)) {
-				delete props[key];
-				changed = true;
-			}
-		}
-		if (changed) {
+		if (designTimeConfigProperties(props)) {
 			await fs.writeJson(runtimeConfigPath, config, { spaces: 2 });
 			logger.info("Trimming/AOT feature switches disabled for the previewer (shadow copy only).");
 		}

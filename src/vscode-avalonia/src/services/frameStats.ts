@@ -68,3 +68,67 @@ export function sampleAlpha(data: Uint8Array): number {
 	}
 	return Math.round(sum / 64);
 }
+
+export interface Rect {
+	x: number;
+	y: number;
+	width: number;
+	height: number;
+}
+
+/**
+ * Bounding box of the pixels that differ between two RGBA frames of the same size (tightly packed), or undefined when
+ * nothing changed. Compares 32-bit pixels; rows are scanned from both ends so small changes stay cheap.
+ */
+export function changedRect(prev: Uint8Array, next: Uint8Array, width: number, height: number): Rect | undefined {
+	const aligned = prev.byteOffset % 4 === 0 && next.byteOffset % 4 === 0;
+	const a = aligned ? new Uint32Array(prev.buffer, prev.byteOffset, width * height) : new Uint32Array(prev.slice().buffer);
+	const b = aligned ? new Uint32Array(next.buffer, next.byteOffset, width * height) : new Uint32Array(next.slice().buffer);
+	const rowDiffers = (y: number) => {
+		for (let i = y * width, end = i + width; i < end; i++) {
+			if (a[i] !== b[i]) {
+				return true;
+			}
+		}
+		return false;
+	};
+	let top = 0;
+	while (top < height && !rowDiffers(top)) {
+		top++;
+	}
+	if (top === height) {
+		return undefined;
+	}
+	let bottom = height - 1;
+	while (bottom > top && !rowDiffers(bottom)) {
+		bottom--;
+	}
+	let left = width;
+	let right = -1;
+	for (let y = top; y <= bottom; y++) {
+		const row = y * width;
+		for (let x = 0; x < left; x++) {
+			if (a[row + x] !== b[row + x]) {
+				left = x;
+				break;
+			}
+		}
+		for (let x = width - 1; x > right; x--) {
+			if (a[row + x] !== b[row + x]) {
+				right = x;
+				break;
+			}
+		}
+	}
+	return { x: left, y: top, width: right - left + 1, height: bottom - top + 1 };
+}
+
+/** Copies a rectangle out of a tightly packed RGBA frame. */
+export function cropRows(data: Uint8Array, width: number, r: Rect): Uint8Array {
+	const out = new Uint8Array(r.width * r.height * 4);
+	for (let y = 0; y < r.height; y++) {
+		const start = ((r.y + y) * width + r.x) * 4;
+		out.set(data.subarray(start, start + r.width * 4), y * r.width * 4);
+	}
+	return out;
+}

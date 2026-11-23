@@ -23,6 +23,8 @@ type State = {
 	xamlResults?: number;
 	file?: string;
 	crashes?: number;
+	framesDrawn?: number;
+	sent?: { full: number; patches: number; bytes: number; encodeMs: number };
 	lastCrash?: string;
 	project?: string;
 	htmlUrl?: string;
@@ -108,6 +110,11 @@ suite("Avalonia previewer (e2e)", () => {
 		await vscode.workspace.getConfiguration("avalonia.previewer").update("defaultZoom", 0.5, vscode.ConfigurationTarget.Global);
 		const doc = await vscode.workspace.openTextDocument(mainWindow);
 		editor = await vscode.window.showTextDocument(doc, vscode.ViewColumn.One);
+	});
+
+	suiteTeardown(async () => {
+		// the zoom tests need a small zoom; later runs (and people watching them) get the normal 100%
+		await vscode.workspace.getConfiguration("avalonia.previewer").update("defaultZoom", undefined, vscode.ConfigurationTarget.Global);
 	});
 
 	test("shows the preview (builds if needed)", async () => {
@@ -282,10 +289,12 @@ suite("Avalonia previewer (e2e)", () => {
 			for (const ff of [{ id: "phone", w: 390, h: 844 }, { id: "tablet", w: 768, h: 1024 }]) {
 				await previewCommand({ type: "setFormFactor", id: ff.id, rotated: false });
 				await waitFor(`${ff.id} size while animating`, (s) => sizeIs(s, ff.w, ff.h), 15000);
-				const f0 = frames(await state());
+				const s0 = await state();
+				const f0 = frames(s0);
+				const drawn0 = s0.framesDrawn ?? 0;
 				await sleep(1000);
 				const s1 = await state();
-				console.log(`[e2e] ${ff.id} ${s1.preview?.frame?.width}x${s1.preview?.frame?.height} px: ${frames(s1) - f0} frames/s`);
+				console.log(`[e2e] ${ff.id} ${s1.preview?.frame?.width}x${s1.preview?.frame?.height} px: ${frames(s1) - f0} frames/s received, ${(s1.framesDrawn ?? 0) - drawn0} drawn; sent ${JSON.stringify(s1.sent)} (before ${JSON.stringify(s0.sent)})`);
 				assert.ok(frames(s1) > f0 + 5, `animation stopped after switching to ${ff.id}: ${frames(s1) - f0} frames/s ${JSON.stringify({ frame: s1.preview?.frame, fps: s1.preview?.recentFps, dc: s1.designDataContext, xaml: s1.lastXaml })}`);
 			}
 			await previewCommand({ type: "setTheme", value: "Dark" });

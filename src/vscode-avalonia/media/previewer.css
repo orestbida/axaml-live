@@ -39,13 +39,15 @@ select option:checked { background: var(--vscode-list-activeSelectionBackground)
 .overlay button:hover { background: var(--vscode-button-hoverBackground); }
 .sep { width: 1px; height: 16px; background: var(--vscode-menu-separatorBackground, var(--vscode-panel-border)); flex: none; }
 
-.stage { position: relative; flex: 1; min-height: 0; overflow: auto;
+/* the preview is centered with a margin; auto margins collapse when it is larger, so it scrolls from the start */
+.stage { position: relative; flex: 1; min-height: 0; overflow: auto; display: flex; padding: var(--stage-pad, 24px); box-sizing: border-box;
 	background-size: 15px 15px;
 	background-image: linear-gradient(to right, var(--vscode-editorIndentGuide-background, rgba(128,128,128,.15)) 1px, transparent 1px), linear-gradient(to bottom, var(--vscode-editorIndentGuide-background, rgba(128,128,128,.15)) 1px, transparent 1px); }
-.frame-box { display: inline-block; margin: 0; }
-.frame-box.device { padding: 14px; border-radius: 26px; background: #1f1f1f; box-shadow: 0 4px 18px rgba(0,0,0,.45); margin: 12px; }
+.frame-box { flex: none; margin: auto; box-shadow: 0 2px 14px rgba(0,0,0,.28); }
+/* phones and tablets: rounded screen corners and a hairline instead of a bezel */
+.frame-box.device { border-radius: 16px; overflow: hidden; border: 1px solid color-mix(in srgb, var(--vscode-foreground) 22%, transparent); }
 canvas { display: block; image-rendering: auto; outline: none; }
-.frame-box.device canvas { border-radius: 10px; }
+
 
 .overlay { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; flex-direction: column; gap: 10px; background: color-mix(in srgb, var(--vscode-editor-background) 80%, transparent); text-align: center; padding: 16px; }
 .overlay.show { display: flex; }

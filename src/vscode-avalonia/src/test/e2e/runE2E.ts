@@ -26,6 +26,7 @@ function prepareUserSettings(userDataDir: string) {
 		/* new profile */
 	}
 	settings["window.newWindowDimensions"] = process.env.E2E_MAXIMIZED === "0" ? "default" : "maximized";
+	delete settings["avalonia.previewer.defaultZoom"]; // left over by an interrupted run: previews start at 100%
 	fs.mkdirSync(path.dirname(file), { recursive: true });
 	fs.writeFileSync(file, JSON.stringify(settings, null, 2));
 }
@@ -74,6 +75,7 @@ async function main() {
 				E2E_SUITE: process.env.E2E_SUITE,
 				E2E_REPORT: process.env.E2E_REPORT,
 				E2E_INCLUDE: process.env.E2E_INCLUDE,
+				E2E_EXT: process.env.E2E_EXT,
 				E2E_SCREENSHOT_ALL: process.env.E2E_SCREENSHOT_ALL,
 			},
 			launchArgs: [

@@ -3,6 +3,8 @@ import path = require("path");
 import { AppConstants } from "../util/Utilities";
 import { getNonce } from "../util/getNouce";
 import { formFactors } from "../xaml/formFactors";
+import * as zlib from "zlib";
+import { changedRect, cropRows } from "../services/frameStats";
 
 export type PanelStatus = "idle" | "starting" | "building" | "ready" | "error";
 
@@ -46,7 +48,7 @@ export class WebPreviewerPanel implements vscode.Disposable {
 	private _xaml: XamlState = {};
 	private _options: PanelOptions;
 	private _lastFrame: FrameMessage | undefined;
-	private _frameInFlight = 0; // time the frame being drawn was posted, 0 = none
+	private _inFlight: number[] = []; // post times of frames the webview has not acknowledged yet
 	private _frameWaiting = false;
 
 	private readonly _onDidDispose = new vscode.EventEmitter<void>();
@@ -73,6 +75,10 @@ export class WebPreviewerPanel implements vscode.Disposable {
 			(msg) => {
 				if (msg?.type === "ready") {
 					this.postAll();
+				} else if (msg?.type === "needFullFrame") {
+					this._shown = undefined;
+					this.sent.refused++;
+					this._frameWaiting = true; // sent as a full frame right after the pending frameDrawn
 				} else if (msg?.type === "frameDrawn") {
 					this.onFrameDrawn();
 				} else if (typeof msg?.type === "string") {
@@ -116,26 +122,73 @@ export class WebPreviewerPanel implements vscode.Disposable {
 	}
 
 	/**
-	 * Frames are megabytes: one is in flight to the webview at a time and only the newest waits, so a slow or hidden
-	 * webview never queues up stale frames (the designer keeps rendering, see PreviewSession.acceptFrame).
+	 * At most a few frames are in flight to the webview (enough to hide the round trip of remote sessions) and only the
+	 * newest waits, so a slow or hidden webview never queues up stale frames (the designer keeps rendering, see
+	 * PreviewSession.acceptFrame). Acknowledgements older than a second are given up on.
 	 */
 	public showFrame(frame: FrameMessage) {
 		this._lastFrame = frame;
-		if (this._frameInFlight && Date.now() - this._frameInFlight < 1000) {
+		const now = Date.now();
+		while (this._inFlight.length && now - this._inFlight[0] > 1000) {
+			this._inFlight.shift();
+		}
+		if (this._inFlight.length >= maxFramesInFlight) {
 			this._frameWaiting = true;
 			return;
 		}
 		this.postFrame(frame);
 	}
 
+	/** What the webview's canvas shows (tightly packed RGBA): patches are computed against it. */
+	private _shown: { width: number; height: number; scale: number; data: Uint8Array } | undefined;
+
+	/**
+	 * Sends only the rectangle that changed since the frame the webview shows (animations usually change a small
+	 * part). In remote sessions (WSL, SSH, containers) every byte crosses the connection to the UI, so pixels are
+	 * also deflated: rendered UI compresses very well and this keeps large previews smooth.
+	 */
 	private postFrame(frame: FrameMessage) {
-		this._frameInFlight = Date.now();
 		this._frameWaiting = false;
-		this._panel.webview.postMessage({ type: "frame", frame });
+		const { width, height, scale } = frame;
+		const data = tightPixels(frame);
+		const shown = this._shown;
+		this._shown = { width, height, scale, data };
+		if (shown && shown.width === width && shown.height === height && shown.scale === scale) {
+			const r = changedRect(shown.data, data, width, height);
+			if (!r) {
+				return; // identical: nothing to draw
+			}
+			if (r.width * r.height < width * height * 0.5) {
+				this._inFlight.push(Date.now());
+				const patch = cropRows(data, width, r);
+				this.sent.patches++;
+				this._panel.webview.postMessage({ type: "patch", frame: { ...r, canvasWidth: width, canvasHeight: height, ...this.encode(patch) } });
+				return;
+			}
+		}
+		this._inFlight.push(Date.now());
+		this.sent.full++;
+		this._panel.webview.postMessage({ type: "frame", frame: { width, height, scale, stride: width * 4, ...this.encode(data) } });
 	}
 
+	private encode(pixels: Uint8Array): { data: Uint8Array; deflated?: boolean } {
+		const t0 = Date.now();
+		const result = !vscode.env.remoteName || pixels.length < 64 * 1024
+			? { data: plainBytes(pixels) }
+			: { data: plainBytes(zlib.deflateRawSync(pixels, { level: 1 })), deflated: true };
+		this.sent.encodeMs += Date.now() - t0;
+		this.sent.bytes += result.data.length;
+		return result;
+	}
+
+	/** Frames the webview has drawn (what the user sees). */
+	public framesDrawn = 0;
+	/** Transfer statistics (debug state). */
+	public readonly sent = { full: 0, patches: 0, bytes: 0, encodeMs: 0, refused: 0 };
+
 	private onFrameDrawn() {
-		this._frameInFlight = 0;
+		this.framesDrawn++;
+		this._inFlight.shift();
 		if (this._frameWaiting && this._lastFrame) {
 			this.postFrame(this._lastFrame);
 		}
@@ -153,6 +206,8 @@ export class WebPreviewerPanel implements vscode.Disposable {
 	private postAll() {
 		this.setOptions(this._options);
 		this.postState();
+		this._shown = undefined;
+		this._inFlight = [];
 		if (this._lastFrame) {
 			this.postFrame(this._lastFrame);
 		}
@@ -221,3 +276,27 @@ export class WebPreviewerPanel implements vscode.Disposable {
 </html>`;
 	}
 }
+
+/** Frame pixels without row padding. */
+function tightPixels(frame: FrameMessage): Uint8Array {
+	const row = frame.width * 4;
+	if (!frame.stride || frame.stride === row) {
+		return frame.data.subarray(0, row * frame.height);
+	}
+	const out = new Uint8Array(row * frame.height);
+	for (let y = 0; y < frame.height; y++) {
+		out.set(frame.data.subarray(y * frame.stride, y * frame.stride + row), y * row);
+	}
+	return out;
+}
+
+/**
+ * A plain Uint8Array over the same memory. Node Buffers have toJSON(): in remote sessions webview messages are
+ * JSON-serialized and a Buffer would travel as an array of numbers (huge and slow) instead of binary.
+ */
+function plainBytes(data: Uint8Array): Uint8Array {
+	return Object.getPrototypeOf(data) === Uint8Array.prototype ? data : new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+}
+
+/** Frames posted to the webview before waiting for its acknowledgements (hides the round trip of remote sessions). */
+const maxFramesInFlight = 3;

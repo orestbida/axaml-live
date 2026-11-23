@@ -15,9 +15,9 @@
 	let zoomMode = saved.zoomMode ?? init.defaultZoom ?? 1; // number | "fitAll" | "fitWidth"
 	let zoom = typeof zoomMode === "number" ? zoomMode : 1;
 	let frame = null; // { width, height, scale }
+	let frameQueue = Promise.resolve();
 	let options = { theme: "Default", formFactor: "default", rotated: false, inputEnabled: true, maxRenderScale: 3 };
 	let lastView = "";
-	let pendingFrame = null;
 
 	// ---------- toolbar ----------
 	const zoomSelect = $("zoom");
@@ -92,7 +92,8 @@
 
 	function layout() {
 		const size = logicalSize();
-		const pad = frameBox.classList.contains("device") ? 2 * (14 + 12) : 0;
+		// stage padding on both sides (+ the device hairline): Fit All / Fit Width keep the margin
+		const pad = 2 * 24 + (frameBox.classList.contains("device") ? 2 : 0);
 		const stageW = stage.clientWidth - pad;
 		const stageH = stage.clientHeight - pad;
 		if (size) {
@@ -129,6 +130,15 @@
 	}
 
 	// ---------- frames ----------
+	async function decodePixels(f) {
+		const bytes = f.data instanceof Uint8Array ? f.data : new Uint8Array(f.data);
+		if (!f.deflated) {
+			return bytes;
+		}
+		const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
+		return new Uint8Array(await new Response(stream).arrayBuffer());
+	}
+
 	function drawFrame(f) {
 		const sizeChanged = !frame || frame.width !== f.width || frame.height !== f.height || frame.scale !== f.scale;
 		frame = { width: f.width, height: f.height, scale: f.scale };
@@ -215,18 +225,19 @@
 		const msg = e.data;
 		switch (msg.type) {
 			case "frame":
-				// draw only the newest frame once per display refresh (smooth animations, no backlog)
-				if (!pendingFrame) {
-					requestAnimationFrame(() => {
-						const f = pendingFrame;
-						pendingFrame = null;
-						if (f) {
-							drawFrame(f);
-						}
-						send({ type: "frameDrawn" }); // the extension posts the next frame only now
-					});
-				}
-				pendingFrame = msg.frame;
+			case "patch":
+				// a few frames/patches are in flight (the extension waits for frameDrawn); patches carry only the changed
+				// rectangle and remote sessions deflate the pixels. Applied strictly in order: decoding is asynchronous.
+				frameQueue = frameQueue.then(() => decodePixels(msg.frame)).then((data) => {
+					if (msg.type === "frame") {
+						drawFrame({ ...msg.frame, data });
+					} else if (frame && canvas.width === msg.frame.canvasWidth && canvas.height === msg.frame.canvasHeight) {
+						const r = msg.frame;
+						ctx.putImageData(new ImageData(new Uint8ClampedArray(data.buffer, data.byteOffset, r.width * r.height * 4), r.width, r.height), r.x, r.y);
+					} else {
+						send({ type: "needFullFrame" });
+					}
+				}).catch(() => send({ type: "needFullFrame" })).then(() => send({ type: "frameDrawn" }));
 				break;
 			case "setZoom":
 				setZoom(msg.zoom);
@@ -247,6 +258,7 @@
 				const { state, xaml } = msg;
 				$("dot").className = "dot " + state.status;
 				$("status").textContent = state.message || state.status;
+				$("status").title = (state.message || state.status) + " (click to choose the previewer host)";
 				$("build").disabled = state.status === "building";
 				$("overlay").className = "overlay" + (state.status !== "ready" ? " show" : "");
 				$("overlayText").textContent = state.message || "";

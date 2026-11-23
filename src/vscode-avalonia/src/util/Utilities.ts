@@ -9,7 +9,8 @@ export const logger = vscode.window.createOutputChannel("Avalonia Client", { log
  * Checks if the given document is an Avalonia file.
  */
 export function isAvaloniaFile(document: vscode.TextDocument): boolean {
-	return document.uri.scheme === "file" && path.extname(document.fileName).toLowerCase() === `.${avaloniaFileExtension}`;
+	// .axaml, or a .xaml file of an Avalonia project (switched to the AXAML language)
+	return document.uri.scheme === "file" && (path.extname(document.fileName).toLowerCase() === `.${avaloniaFileExtension}` || document.languageId === "AXAML");
 }
 
 export function getFileName(filePath: string): string {

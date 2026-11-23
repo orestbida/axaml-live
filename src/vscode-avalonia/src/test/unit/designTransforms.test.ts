@@ -1,5 +1,5 @@
 import * as assert from "assert";
-import { applyDesignDataContext, applyDesignSize, applyThemeVariant } from "../../xaml/designTransforms";
+import { applyDesignDataContext, applyDesignSize, applyThemeVariant, designDataHint } from "../../xaml/designTransforms";
 import { formFactors, resolveFormFactor } from "../../xaml/formFactors";
 
 const windowXaml = `<Window xmlns="https://github.com/avaloniaui"
@@ -157,5 +157,18 @@ suite("design transforms: design data context by ViewLocator convention", () => 
 		]) {
 			assert.strictEqual(applyDesignDataContext(xaml), xaml, xaml);
 		}
+	});
+});
+
+suite("design data hint", () => {
+	test("names a view model without a parameterless constructor", () => {
+		assert.strictEqual(
+			designDataHint("Unable to find public constructor for type Dash:Dash.ViewModels.SettingsViewModel() Line 2, position 83."),
+			"no design data: SettingsViewModel has no parameterless constructor (add one for design time, or Design.DataContext)"
+		);
+	});
+
+	test("other failures: the first line of the error", () => {
+		assert.strictEqual(designDataHint("Type 'Foo' not found\nmore"), "no design data: Type 'Foo' not found");
 	});
 });

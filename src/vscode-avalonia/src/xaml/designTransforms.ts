@@ -134,3 +134,12 @@ function applyEdits(text: string, edits: { start: number; end: number; text: str
 		.sort((a, b) => b.start - a.start)
 		.reduce((t, e) => t.substring(0, e.start) + e.text + t.substring(e.end), text);
 }
+
+/** Short explanation for the panel when the automatic design data context could not be created. */
+export function designDataHint(error: string): string {
+	const ctor = /Unable to find public constructor for type (?:[\w.]+:)?([\w.]+)\(\)/.exec(error);
+	if (ctor) {
+		return `no design data: ${ctor[1].split(".").pop()} has no parameterless constructor (add one for design time, or Design.DataContext)`;
+	}
+	return `no design data: ${error.split("\n")[0].slice(0, 120)}`;
+}

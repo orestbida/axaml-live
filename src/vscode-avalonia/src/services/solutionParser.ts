@@ -138,6 +138,11 @@ async function parseSolution(): Promise<sln.Solution | undefined> {
  * Paths are compared case-insensitively on Windows (VS Code lowercases the drive letter).
  * Files created after the last parse are matched to the project whose folder contains them.
  */
+/** True for a file the solution lists as Avalonia XAML (AvaloniaXaml item), e.g. a .xaml file of an Avalonia project. */
+export function isAvaloniaXamlFile(filePath: string, solution = _model): boolean {
+	return !!solution?.files.some((f) => samePath(f.path, filePath));
+}
+
 export function getFileDetails(filePath: string, solution = _model): sln.File | undefined {
 	if (!solution) {
 		return undefined;
