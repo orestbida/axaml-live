@@ -103,7 +103,6 @@ const namedKeys: Record<string, number> = {
 	Tab: 3,
 	Enter: 6,
 	Escape: 13,
-	" ": 18,
 	PageUp: 19,
 	PageDown: 20,
 	End: 21,
@@ -118,6 +117,9 @@ const namedKeys: Record<string, number> = {
 
 /** Maps a DOM `KeyboardEvent.key` to Avalonia's Key enum (0 = None). */
 export function mapKey(domKey: string): number {
+	if (domKey === " ") {
+		return 18; // Space
+	}
 	if (domKey in namedKeys) {
 		return namedKeys[domKey];
 	}

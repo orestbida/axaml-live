@@ -40,6 +40,7 @@ suite("preview protocol messages", () => {
 	test("DOM keys map to Avalonia keys", () => {
 		assert.strictEqual(mapKey("Backspace"), 2);
 		assert.strictEqual(mapKey("Enter"), 6);
+		assert.strictEqual(mapKey(" "), 18);
 		assert.strictEqual(mapKey("ArrowLeft"), 23);
 		assert.strictEqual(mapKey("a"), 44);
 		assert.strictEqual(mapKey("Z"), 69);
