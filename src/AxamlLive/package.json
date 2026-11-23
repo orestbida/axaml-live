@@ -28,13 +28,13 @@
     "theme": "dark"
   },
   "bugs": {
-    "url": "https://github.com/orestbida/AvaloniaVSCode/issues"
+    "url": "https://github.com/orestbida/axaml-live/issues"
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/orestbida/AvaloniaVSCode"
+    "url": "https://github.com/orestbida/axaml-live"
   },
-  "homepage": "https://github.com/orestbida/AvaloniaVSCode#readme",
+  "homepage": "https://github.com/orestbida/axaml-live#readme",
   "activationEvents": [
     "workspaceContains:**/*.axaml",
     "onLanguage:axaml"

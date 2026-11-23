@@ -6,7 +6,7 @@ to definition and a formatter.
 It is based on the archived [AvaloniaVSCode](https://github.com/AvaloniaUI/AvaloniaVSCode) extension and is licensed
 under MIT.
 
-![Live preview of an .axaml file in VS Code](https://raw.githubusercontent.com/orestbida/AvaloniaVSCode/HEAD/docs/images/screenshot.png)
+![Live preview of an .axaml file in VS Code](https://raw.githubusercontent.com/orestbida/axaml-live/HEAD/docs/images/screenshot.png)
 
 ## Requirements
 
@@ -113,4 +113,4 @@ endorsed by AvaloniaUI OÜ. All other trademarks are the property of their respe
 ## License
 
 MIT, see [LICENSE](LICENSE). Third party components and their licenses are listed in
-[THIRD-PARTY-NOTICES.txt](https://github.com/orestbida/AvaloniaVSCode/blob/HEAD/src/AxamlLive/THIRD-PARTY-NOTICES.txt).
+[THIRD-PARTY-NOTICES.txt](https://github.com/orestbida/axaml-live/blob/HEAD/src/AxamlLive/THIRD-PARTY-NOTICES.txt).
