@@ -1,10 +1,9 @@
-﻿namespace Avalonia.Ide.CompletionEngine;
+namespace Avalonia.Ide.CompletionEngine;
 
 /// <summary>
 /// Abstracts text change from editor
 /// </summary>
-public interface ITextChange
-{
+public interface ITextChange {
     /// <summary>
     /// Position of new text
     /// </summary>

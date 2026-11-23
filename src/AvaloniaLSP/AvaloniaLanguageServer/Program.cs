@@ -1,14 +1,12 @@
-﻿using AvaloniaLanguageServer.Handlers;
+using AvaloniaLanguageServer.Handlers;
 using AvaloniaLanguageServer.Models;
 using OmniSharp.Extensions.LanguageServer.Protocol.Server;
 
 namespace AvaloniaLanguageServer;
 
-public class Program
-{
+public class Program {
     static ILanguageServer? server;
-    public static async Task Main(string[] args)
-    {
+    public static async Task Main(string[] args) {
         InitializeLogging();
         server = await LanguageServer.From(ConfigureOptions);
 
@@ -16,8 +14,7 @@ public class Program
         await server.WaitForExit;
     }
 
-    static void ConfigureOptions(LanguageServerOptions options)
-    {
+    static void ConfigureOptions(LanguageServerOptions options) {
         options
             .WithInput(Console.OpenStandardInput())
             .WithOutput(Console.OpenStandardOutput())
@@ -33,15 +30,13 @@ public class Program
             .WithHandler<CodeActionHandler>()
             .WithHandler<WatchedFilesHandler>()
             .WithServices(ConfigureServices)
-            .OnInitialize((init_server, request, token) =>
-            {
+            .OnInitialize((init_server, request, token) => {
                 server = init_server;
                 return Task.CompletedTask;
             });
     }
 
-    static void ConfigureServices(IServiceCollection services)
-    {
+    static void ConfigureServices(IServiceCollection services) {
         services.AddSingleton(new ConfigurationItem { Section = "Avalonia Server" });
         services.AddSingleton(new DocumentSelector(
             new DocumentFilter { Pattern = "**/*.axaml" }
@@ -53,9 +48,8 @@ public class Program
 
     static ILanguageServer? GetServer() => server;
 
-    static void InitializeLogging()
-    {
-        string logFilePath = Path.Combine(Path.GetTempPath(), "avalonia.log");
+    static void InitializeLogging() {
+        string logFilePath = Path.Combine(Path.GetTempPath(), "axaml-live.log");
         Log.Logger = new LoggerConfiguration()
             .WriteTo.File(logFilePath, shared: true)
             .Enrich.FromLogContext()

@@ -1,4 +1,4 @@
-﻿// Extract from https://github.com/yck1509/ConfuserEx/blob/3e3e4ae8ef01e3a169591e9b7803408e38cce7ca/Confuser.Core/DnlibUtils.cs
+// Extract from https://github.com/yck1509/ConfuserEx/blob/3e3e4ae8ef01e3a169591e9b7803408e38cce7ca/Confuser.Core/DnlibUtils.cs
 using System.Collections.Generic;
 using System.Linq;
 using System.Runtime.CompilerServices;
@@ -6,16 +6,14 @@ using dnlib.DotNet;
 
 namespace Avalonia.Ide.CompletionEngine.DnlibMetadataProvider;
 
-internal static class DnlibExtension
-{
+internal static class DnlibExtension {
     /// <summary>
     /// Determines whether the specified property is public.
     /// </summary>
     /// <param name="property">The property.</param>
     /// <returns><c>true</c> if the specified property is public; otherwise, <c>false</c>.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static bool IsPublic(this PropertyDef property)
-    {
+    public static bool IsPublic(this PropertyDef property) {
         return property.GetMethod.IsPublic()
             || property.SetMethod.IsPublic()
             || property.OtherMethods?.Any(method => method.IsPublic()) == true;
@@ -27,8 +25,7 @@ internal static class DnlibExtension
     /// <param name="property"></param>
     /// <returns></returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static bool IsInternal(this PropertyDef property)
-    {
+    public static bool IsInternal(this PropertyDef property) {
         return property.GetMethod is { IsPrivate: true, Access: MethodAttributes.Assembly }
             || property.SetMethod is { IsPrivate: true, Access: MethodAttributes.Assembly }
             || property.OtherMethods?.Any(method => method is { IsPrivate: true, Access: MethodAttributes.Assembly }) == true;
@@ -40,8 +37,7 @@ internal static class DnlibExtension
     /// <param name="evt">The event.</param>
     /// <returns><c>true</c> if the specified event is public; otherwise, <c>false</c>.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static bool IsPublic(this EventDef evt)
-    {
+    public static bool IsPublic(this EventDef evt) {
         return evt.AddMethod?.IsPublic == true
             || evt.RemoveMethod?.IsPublic == true
             || evt.InvokeMethod?.IsPublic == true
@@ -54,8 +50,7 @@ internal static class DnlibExtension
     /// <param name="evt">The event.</param>
     /// <returns><c>true</c> if the specified event is internal; otherwise, <c>false</c>.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static bool IsInternal(this EventDef evt)
-    {
+    public static bool IsInternal(this EventDef evt) {
         return evt.AddMethod is { IsPrivate: true, Access: MethodAttributes.Assembly }
             || evt.RemoveMethod is { IsPrivate: true, Access: MethodAttributes.Assembly }
             || evt.InvokeMethod is { IsPrivate: true, Access: MethodAttributes.Assembly }
@@ -70,8 +65,7 @@ internal static class DnlibExtension
     public static bool IsPublicOrInternal(this MethodDef methodDef)
         => methodDef?.IsPublic == true || methodDef?.Access == MethodAttributes.Assembly;
 
-    public static IEnumerable<string> GetVisibleTo(this AssemblyDef assemblyDef)
-    {
+    public static IEnumerable<string> GetVisibleTo(this AssemblyDef assemblyDef) {
         var result = assemblyDef.CustomAttributes
                  .Where(att => att.TypeFullName == "System.Runtime.CompilerServices.InternalsVisibleToAttribute")
                  .Select(att => att.ConstructorArguments[0].Value.ToString())

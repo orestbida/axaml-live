@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -7,19 +7,14 @@ using System.Text.Json;
 
 namespace Avalonia.Ide.CompletionEngine.AssemblyMetadata;
 
-public static class DepsJsonAssemblyListLoader
-{
+public static class DepsJsonAssemblyListLoader {
     private record Library(string PackageName, string LibraryPath, string DllName);
 
-    private static IEnumerable<Library> TransformDeps(JsonElement lstr)
-    {
-        foreach (var prop in lstr.EnumerateObject())
-        {
+    private static IEnumerable<Library> TransformDeps(JsonElement lstr) {
+        foreach (var prop in lstr.EnumerateObject()) {
             var package = prop.Name;
-            if (prop.Value.TryGetProperty("runtime", out var runtime))
-            {
-                foreach (var dllprop in runtime.EnumerateObject())
-                {
+            if (prop.Value.TryGetProperty("runtime", out var runtime)) {
+                foreach (var dllprop in runtime.EnumerateObject()) {
                     var libraryPath = dllprop.Name;
                     var dllName = libraryPath.Split('/').Last();
                     yield return new Library(package, libraryPath, dllName);
@@ -28,57 +23,46 @@ public static class DepsJsonAssemblyListLoader
         }
     }
 
-    private static IEnumerable<string> GetNugetPackagesDirs()
-    {
+    private static IEnumerable<string> GetNugetPackagesDirs() {
         // NUGET_PACKAGES overrides the default global packages folder
         var redirectedPath = Environment.GetEnvironmentVariable("NUGET_PACKAGES");
 
-        if (!string.IsNullOrEmpty(redirectedPath))
-        {
+        if (!string.IsNullOrEmpty(redirectedPath)) {
             yield return redirectedPath;
         }
 
         // value of the variable, not its name: package assemblies of class libraries (not copied to bin) were never found
         var home = Environment.GetEnvironmentVariable(RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? "USERPROFILE" : "HOME");
 
-        if (!string.IsNullOrEmpty(home))
-        {
+        if (!string.IsNullOrEmpty(home)) {
             yield return Path.Combine(home, ".nuget", "packages");
         }
     }
 
-    public static IEnumerable<string> ParseFile(string path)
-    {
+    public static IEnumerable<string> ParseFile(string path) {
         var dir = Path.GetDirectoryName(path);
         var nugetDirs = GetNugetPackagesDirs();
         var deps = JsonDocument.Parse(File.ReadAllText(path));
-        if (deps is null || dir is null)
-        {
+        if (deps is null || dir is null) {
             yield break;
         }
 
         var target = deps.RootElement.GetProperty("runtimeTarget").GetProperty("name").GetString();
-        if (target is null)
-        {
+        if (target is null) {
             yield break;
         }
 
-        foreach (var l in TransformDeps(deps.RootElement.GetProperty("targets").GetProperty(target)))
-        {
+        foreach (var l in TransformDeps(deps.RootElement.GetProperty("targets").GetProperty(target))) {
             var localPath = Path.Combine(dir, l.DllName);
-            if (File.Exists(localPath))
-            {
+            if (File.Exists(localPath)) {
                 yield return localPath;
                 continue;
             }
-            foreach (var nugetPath in nugetDirs)
-            {
-                foreach (var tolower in new[] { false, true })
-                {
+            foreach (var nugetPath in nugetDirs) {
+                foreach (var tolower in new[] { false, true }) {
                     var packagePath = Path.Combine(nugetPath,
                         tolower ? l.PackageName.ToLowerInvariant() : l.PackageName, l.LibraryPath);
-                    if (File.Exists(packagePath))
-                    {
+                    if (File.Exists(packagePath)) {
                         yield return packagePath;
                         break;
                     }

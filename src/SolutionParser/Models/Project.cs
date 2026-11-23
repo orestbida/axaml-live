@@ -2,8 +2,8 @@ using System.Text.Json.Serialization;
 using MSProject = Microsoft.Build.Evaluation.Project;
 
 namespace Models;
-internal class Project
-{
+
+internal class Project {
     public required string Name { get; set; }
     public required string Path { get; set; }
 
@@ -25,8 +25,7 @@ internal class Project
     public override string ToString() => $"{Name} ({OutputType}) - {DesignerHostPath}";
 }
 
-internal class ProjectFile
-{
+internal class ProjectFile {
     public required string Path { get; set; }
 
     public required string TargetPath { get; set; }

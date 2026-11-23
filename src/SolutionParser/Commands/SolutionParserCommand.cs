@@ -10,10 +10,9 @@ using MSProject = Microsoft.Build.Evaluation.Project;
 using Project = Models.Project;
 
 namespace Commands;
-public sealed class SolutionParserCommand : Command<SolutionParserCommand.Settings>
-{
-    public sealed class Settings : CommandSettings
-    {
+
+public sealed class SolutionParserCommand : Command<SolutionParserCommand.Settings> {
+    public sealed class Settings : CommandSettings {
         [Description("The solution file (.sln) path.")]
         [CommandArgument(0, "<SOLUTION>")]
         public required string Solution { get; init; }
@@ -21,22 +20,16 @@ public sealed class SolutionParserCommand : Command<SolutionParserCommand.Settin
 
     record ProjectRecord(string Name, string Path);
 
-    public override int Execute([NotNull] CommandContext context, [NotNull] Settings settings)
-    {
+    public override int Execute([NotNull] CommandContext context, [NotNull] Settings settings) {
         var solutionFilePath = Path.GetFullPath(settings.Solution);
         string? solutionFolderPath;
 
-        if (Directory.Exists(solutionFilePath))
-        {
+        if (Directory.Exists(solutionFilePath)) {
             solutionFolderPath = solutionFilePath;
             solutionFilePath = null;
-        }
-        else if (File.Exists(solutionFilePath))
-        {
+        } else if (File.Exists(solutionFilePath)) {
             solutionFolderPath = Path.GetDirectoryName(solutionFilePath);
-        }
-        else
-        {
+        } else {
             Console.Error.WriteLine($"Invalid solution path \"{solutionFilePath}\"");
             return 1;
         }
@@ -44,37 +37,30 @@ public sealed class SolutionParserCommand : Command<SolutionParserCommand.Settin
         // Lookup a MSBuild instance from the installed dotnet SDKs.
         // The results should NOT be ordered: the first one matches the global.json if present.
         VisualStudioInstance? msbuildInstance;
-        try
-        {
+        try {
             msbuildInstance = MSBuildLocator
-                .QueryVisualStudioInstances(new VisualStudioInstanceQueryOptions
-                {
+                .QueryVisualStudioInstances(new VisualStudioInstanceQueryOptions {
                     DiscoveryTypes = DiscoveryType.DotNetSdk,
                     WorkingDirectory = solutionFolderPath
                 })
                 .FirstOrDefault();
-        }
-        catch (Exception e)
-        {
+        } catch (Exception e) {
             // hostfxr fails when global.json requests an SDK that is not installed
             Console.Error.WriteLine(e.Message);
             msbuildInstance = null;
         }
 
-        if (msbuildInstance is null)
-        {
+        if (msbuildInstance is null) {
             // global.json pins an SDK that is not installed (e.g. rollForward: disable). Building needs that SDK, but
             // finding the projects' outputs for the previewer does not: analyze with the newest installed SDK.
             msbuildInstance = MSBuildLocator
-                .QueryVisualStudioInstances(new VisualStudioInstanceQueryOptions
-                {
+                .QueryVisualStudioInstances(new VisualStudioInstanceQueryOptions {
                     DiscoveryTypes = DiscoveryType.DotNetSdk,
                     WorkingDirectory = Path.GetTempPath()
                 })
                 .OrderByDescending(i => i.Version)
                 .FirstOrDefault();
-            if (msbuildInstance is null)
-            {
+            if (msbuildInstance is null) {
                 Console.Error.WriteLine($"Could not find a matching .NET SDK for {solutionFolderPath}");
                 return 2;
             }
@@ -92,48 +78,39 @@ public sealed class SolutionParserCommand : Command<SolutionParserCommand.Settin
         return 0;
     }
 
-    private void ExecuteCore(string? solutionFilePath, string? solutionFolderPath)
-    {
+    private void ExecuteCore(string? solutionFilePath, string? solutionFolderPath) {
         IEnumerable<ProjectRecord>? projFiles;
 
-        if (solutionFilePath is not null)
-        {
+        if (solutionFilePath is not null) {
             var sln = SolutionFile.Parse(solutionFilePath);
             projFiles = sln.ProjectsInOrder
                 .Where(prj => prj.ProjectType == SolutionProjectType.KnownToBeMSBuildFormat)
                 .Select(prj => new ProjectRecord(prj.ProjectName, prj.AbsolutePath));
-        }
-        else if (solutionFolderPath is not null)
-        {
+        } else if (solutionFolderPath is not null) {
             string[] projFileGlobs = ["*.csproj", "*.fsproj"];
             projFiles = projFileGlobs
                 .SelectMany(glob => Directory.GetFiles(solutionFolderPath, glob))
                 .Select(p => new ProjectRecord(Path.GetFileNameWithoutExtension(p), p));
-        }
-        else
-        {
+        } else {
             throw new InvalidOperationException("Invalid solution path");
         }
 
         var projects = new ConcurrentBag<Project>();
-        Parallel.ForEach(projFiles, proj =>
-        {
+        Parallel.ForEach(projFiles, proj => {
             var projectDetails = GetProjectDetails(proj.Name, proj.Path);
-            if (projectDetails != null)
+            if (projectDetails != null) {
                 projects.Add(projectDetails);
+            }
         });
 
         var allProjects = projects.ToList();
 
         List<ProjectFile> designerFiles = new();
 
-        foreach (var proj in allProjects)
-        {
-            proj.CoreProject?.GetItems("AvaloniaXaml").ToList().ForEach(item =>
-            {
+        foreach (var proj in allProjects) {
+            proj.CoreProject?.GetItems("AvaloniaXaml").ToList().ForEach(item => {
                 var filePath = Path.GetFullPath(item.EvaluatedInclude, proj.DirectoryPath ?? "");
-                var designerFile = new ProjectFile
-                {
+                var designerFile = new ProjectFile {
                     Path = filePath,
                     TargetPath = proj.TargetPath,
                     ProjectPath = proj.Path
@@ -145,8 +122,7 @@ public sealed class SolutionParserCommand : Command<SolutionParserCommand.Settin
         var solution = solutionFilePath ?? solutionFolderPath;
         var json = new { Solution = solution, Projects = allProjects, Files = designerFiles };
 
-        var jsonStr = JsonSerializer.Serialize(json, new JsonSerializerOptions
-        {
+        var jsonStr = JsonSerializer.Serialize(json, new JsonSerializerOptions {
             WriteIndented = true,
             PropertyNamingPolicy = JsonNamingPolicy.CamelCase
         });
@@ -157,12 +133,9 @@ public sealed class SolutionParserCommand : Command<SolutionParserCommand.Settin
         Console.WriteLine(jsonStr);
     }
 
-    Project? GetProjectDetails(string name, string projPath)
-    {
-        try
-        {
-            var options = new ProjectOptions
-            {
+    Project? GetProjectDetails(string name, string projPath) {
+        try {
+            var options = new ProjectOptions {
                 LoadSettings = ProjectLoadSettings.IgnoreMissingImports | ProjectLoadSettings.FailOnUnresolvedSdk,
                 ProjectCollection = new ProjectCollection()
             };
@@ -170,14 +143,12 @@ public sealed class SolutionParserCommand : Command<SolutionParserCommand.Settin
 
             // Multi-targeted project (TargetFrameworks): TargetPath etc. are only defined per framework (#99).
             // Prefer the first .NET (Core) framework, the previewer cannot host .NET Framework / mobile heads.
-            if (string.IsNullOrEmpty(proj.GetPropertyValue("TargetFramework")))
-            {
+            if (string.IsNullOrEmpty(proj.GetPropertyValue("TargetFramework"))) {
                 var tfms = proj.GetPropertyValue("TargetFrameworks")
                     .Split(";", StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
                 var tfm = tfms.FirstOrDefault(t => t.StartsWith("net") && t.Contains(".") && !t.Contains("-"))
                           ?? tfms.FirstOrDefault();
-                if (tfm != null)
-                {
+                if (tfm != null) {
                     options.GlobalProperties = new Dictionary<string, string> { ["TargetFramework"] = tfm };
                     options.ProjectCollection = new ProjectCollection();
                     proj = MSProject.FromFile(projPath, options);
@@ -198,8 +169,7 @@ public sealed class SolutionParserCommand : Command<SolutionParserCommand.Settin
 
             var intermediateOutputPath = GetIntermediateOutputPath(proj);
 
-            return new Project
-            {
+            return new Project {
                 Name = name,
                 Path = projPath,
                 TargetPath = assembly,
@@ -215,24 +185,21 @@ public sealed class SolutionParserCommand : Command<SolutionParserCommand.Settin
                 IntermediateOutputPath = intermediateOutputPath
 
             };
-        }
-        catch (Exception ex)
-        {
+        } catch (Exception ex) {
             Console.Error.WriteLine($"Error parsing project {name}: {ex.Message}");
             return null;
         }
     }
 
-    static string GetIntermediateOutputPath(MSProject proj)
-    {
+    static string GetIntermediateOutputPath(MSProject proj) {
         var intermediateOutputPath = proj.GetPropertyValue("IntermediateOutputPath");
         var iop = Path.Combine(intermediateOutputPath, "Avalonia", "references");
 
-        if (!Path.IsPathRooted(intermediateOutputPath))
-        {
+        if (!Path.IsPathRooted(intermediateOutputPath)) {
             iop = Path.Combine(proj.DirectoryPath ?? "", iop);
-            if (Path.DirectorySeparatorChar == '/')
+            if (Path.DirectorySeparatorChar == '/') {
                 iop = iop.Replace("\\", "/");
+            }
         }
 
         return iop;

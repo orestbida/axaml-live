@@ -1,10 +1,9 @@
-﻿using System;
+using System;
 
 namespace Avalonia.Ide.CompletionEngine;
 
 [Flags]
-public enum CompletionKind
-{
+public enum CompletionKind {
     None = 0x0,
     Comment = 0x1,
     Class = 0x2,
@@ -16,7 +15,7 @@ public enum CompletionKind
     MarkupExtension = 0x80,
     Event = 0x100,
     AttachedEvent = 0x200,
-    
+
     /// <summary>
     /// Properties from DataContexts (view models), specifically this is for VS
     /// to use a different icon from normal properties
@@ -46,19 +45,16 @@ public record Completion(string DisplayText,
     string? Suffix = null,
     int? DeleteTextOffset = null,
     byte Priority = 255
-    )
-{
+    ) {
     public override string ToString() => DisplayText;
 
     public Completion(string insertText, CompletionKind kind, string? suffix = default, byte priority = 255) :
-        this(insertText, insertText, insertText, kind, Suffix: suffix, Priority: priority)
-    {
+        this(insertText, insertText, insertText, kind, Suffix: suffix, Priority: priority) {
 
     }
 
     public Completion(string displayText, string insertText, CompletionKind kind, string? suffix = default, byte priority = 255) :
-        this(displayText, insertText, displayText, kind, Priority: priority)
-    {
+        this(displayText, insertText, displayText, kind, Priority: priority) {
 
     }
 

@@ -1,27 +1,24 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 
 namespace Avalonia.Ide.CompletionEngine;
 
-public class Metadata
-{
+public class Metadata {
     readonly Dictionary<string, Dictionary<string, MetadataType>> _namespaces = new();
     readonly Dictionary<string, string> _inverseNamespace = new();
 
     public IReadOnlyDictionary<string, Dictionary<string, MetadataType>> Namespaces => _namespaces;
     public IReadOnlyDictionary<string, string> InverseNamespace => _inverseNamespace;
 
-    public void AddType(string ns, MetadataType type)
-    {
+    public void AddType(string ns, MetadataType type) {
         _namespaces.GetOrCreate(ns)[type.Name] = type;
         _inverseNamespace[type.FullName] = ns;
     }
 }
 
 [DebuggerDisplay("{Name}")]
-public record MetadataType(string Name)
-{
+public record MetadataType(string Name) {
     public bool IsEnum { get; set; }
     public bool IsMarkupExtension { get; set; }
     public bool IsStatic { get; set; }
@@ -50,13 +47,12 @@ public record MetadataType(string Name)
     public string? AssemblyQualifiedName { get; set; }
     public bool IsNullable { get; init; }
     public MetadataType? UnderlyingType { get; init; }
-    public IEnumerable<(MetadataType Type,string Name)> TemplateParts { get; internal set; } = 
+    public IEnumerable<(MetadataType Type, string Name)> TemplateParts { get; internal set; } =
         Array.Empty<(MetadataType Type, string Name)>();
     public bool IsAbstract { get; internal set; } = false;
 }
 
-public enum MetadataTypeCtorArgument
-{
+public enum MetadataTypeCtorArgument {
     None,
     Type,
     Object,

@@ -11,3 +11,5 @@ Local changes:
 - Multi-targeted projects (`TargetFrameworks`) are evaluated for their first .NET framework.
 - Project references are resolved relative to the project folder (were resolved relative to the project file).
 - Logs the selected MSBuild instance to stderr.
+
+- Reformatted to the repository code style (opening braces on the same line, see `.editorconfig`).

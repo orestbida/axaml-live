@@ -1,10 +1,10 @@
 using System.Text.RegularExpressions;
 using Avalonia.Ide.CompletionEngine;
 using Microsoft.CodeAnalysis;
-using Metadata = Avalonia.Ide.CompletionEngine.Metadata;
-using Range = OmniSharp.Extensions.LanguageServer.Protocol.Models.Range;
 using Diagnostic = OmniSharp.Extensions.LanguageServer.Protocol.Models.Diagnostic;
 using DiagnosticSeverity = OmniSharp.Extensions.LanguageServer.Protocol.Models.DiagnosticSeverity;
+using Metadata = Avalonia.Ide.CompletionEngine.Metadata;
+using Range = OmniSharp.Extensions.LanguageServer.Protocol.Models.Range;
 
 namespace AvaloniaLanguageServer.Services;
 
@@ -22,9 +22,8 @@ public sealed record ResourceKeySymbol(Range Range, string Key) : XamlSymbol(Ran
 /// compilation is available, compiled binding paths (x:DataType). Deliberately conservative: unknown namespaces,
 /// markup extensions and complex binding paths are not reported.
 /// </summary>
-public sealed class XamlAnalyzer
-{
-    public const string Source = "Avalonia";
+public sealed class XamlAnalyzer {
+    public const string Source = "AXAML Live";
     static readonly Regex BindingRegex = new(@"^\{\s*(?:Binding|CompiledBinding|x:Bind)\s*(?:Path\s*=\s*)?(?<path>[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*)\s*(?<rest>[,}])", RegexOptions.Compiled);
     static readonly Regex ResourceRegex = new(@"^\{\s*(?:StaticResource|DynamicResource)\s+(?<key>[^\s,}]+)", RegexOptions.Compiled);
 
@@ -32,93 +31,95 @@ public sealed class XamlAnalyzer
     readonly Metadata? _metadata;
     readonly Compilation? _compilation;
 
-    public XamlAnalyzer(XamlDocument doc, Metadata? metadata, Compilation? compilation)
-    {
+    public XamlAnalyzer(XamlDocument doc, Metadata? metadata, Compilation? compilation) {
         _doc = doc;
         _metadata = metadata;
         _compilation = compilation;
     }
 
-    // ---------------------------------------------------------------- diagnostics
-
-    public List<Diagnostic> Analyze()
-    {
+    public List<Diagnostic> Analyze() {
         var result = new List<Diagnostic>();
-        if (_doc.SyntaxError is { } err)
+        if (_doc.SyntaxError is { } err) {
             result.Add(Make(err.Range, err.Message, DiagnosticSeverity.Error, "AVLS0001"));
-        if (_metadata == null)
-            return result;
+        }
 
-        foreach (var el in _doc.Elements)
-        {
-            if (Skip(el.NamespaceUri))
+        if (_metadata == null) {
+            return result;
+        }
+
+        foreach (var el in _doc.Elements) {
+            if (Skip(el.NamespaceUri)) {
                 continue;
+            }
 
             MetadataType? type;
-            if (el.IsPropertyElement)
-            {
+            if (el.IsPropertyElement) {
                 var dot = el.LocalName.IndexOf('.');
                 var owner = ResolveType(el.NamespaceUri, el.LocalName[..dot]);
-                if (owner == null)
-                {
-                    if (NamespaceKnown(el.NamespaceUri) && !InCompilation(el.NamespaceUri, el.LocalName[..dot]))
+                if (owner == null) {
+                    if (NamespaceKnown(el.NamespaceUri) && !InCompilation(el.NamespaceUri, el.LocalName[..dot])) {
                         result.Add(UnknownType(el.NameRange with { End = el.NameRange.Start with { Character = el.NameRange.Start.Character + dot } }, el.LocalName[..dot], el.NamespaceUri));
+                    }
+
                     continue;
                 }
                 var propName = el.LocalName[(dot + 1)..];
-                if (FindProperty(owner, propName) == null && FindEvent(owner, propName) == null)
-                {
+                if (FindProperty(owner, propName) == null && FindEvent(owner, propName) == null) {
                     var start = el.NameRange.Start with { Character = el.NameRange.Start.Character + dot + 1 };
                     result.Add(UnknownMember(new Range(start, el.NameRange.End), propName, owner));
                 }
                 continue;
             }
 
-            type = ResolveType(el.NamespaceUri, el.LocalName);
-            if (type == null)
-            {
-                if (NamespaceKnown(el.NamespaceUri) && !InCompilation(el.NamespaceUri, el.LocalName))
+            // element syntax for markup extensions: <StaticResource ResourceKey="..."/> is StaticResourceExtension
+            type = ResolveType(el.NamespaceUri, el.LocalName) ?? ResolveType(el.NamespaceUri, el.LocalName + "Extension");
+            if (type == null) {
+                if (NamespaceKnown(el.NamespaceUri) && !InCompilation(el.NamespaceUri, el.LocalName)) {
                     result.Add(UnknownType(el.NameRange, el.LocalName, el.NamespaceUri));
+                }
+
                 continue;
             }
-            if (type.IsMarkupExtension)
+            if (type.IsMarkupExtension) {
                 continue;
+            }
 
-            foreach (var a in el.Attributes)
-            {
-                if (a.Prefix == "xmlns" || (a.Prefix == "" && a.LocalName == "xmlns") || Skip(a.NamespaceUri) || a.NamespaceUri == "http://www.w3.org/XML/1998/namespace")
+            foreach (var a in el.Attributes) {
+                if (a.Prefix == "xmlns" || (a.Prefix == "" && a.LocalName == "xmlns") || Skip(a.NamespaceUri) || a.NamespaceUri == "http://www.w3.org/XML/1998/namespace") {
                     continue;
+                }
                 // unprefixed attached properties (Grid.Row) resolve their owner in the default namespace,
                 // also on prefixed elements (<local:MyControl Grid.Row="1">)
                 var attrNs = a.Prefix == "" ? el.Namespaces.GetValueOrDefault("", el.NamespaceUri) : a.NamespaceUri;
                 // Classes.Name="{Binding}" toggles a style class
-                if (a.Prefix == "" && a.LocalName.StartsWith("Classes.", StringComparison.Ordinal))
+                if (a.Prefix == "" && a.LocalName.StartsWith("Classes.", StringComparison.Ordinal)) {
                     continue;
-                if (a.LocalName.Contains('.'))
-                {
+                }
+
+                if (a.LocalName.Contains('.')) {
                     var dot = a.LocalName.IndexOf('.');
                     var owner = ResolveType(attrNs, a.LocalName[..dot]);
-                    if (owner == null)
-                    {
-                        if (NamespaceKnown(attrNs) && !InCompilation(attrNs, a.LocalName[..dot]))
+                    if (owner == null) {
+                        if (NamespaceKnown(attrNs) && !InCompilation(attrNs, a.LocalName[..dot])) {
                             result.Add(UnknownType(a.NameRange with { End = a.NameRange.Start with { Character = a.NameRange.Start.Character + dot } }, a.LocalName[..dot], attrNs));
+                        }
+
                         continue;
                     }
                     var name = a.LocalName[(dot + 1)..];
                     var prop = FindProperty(owner, name);
-                    if (prop == null && FindEvent(owner, name) == null && !HasAvaloniaProperty(owner, name))
+                    // without a compilation, attached properties declared only by a static setter cannot be checked
+                    if (prop == null && FindEvent(owner, name) == null && _compilation != null && !HasAvaloniaProperty(owner, name)) {
                         result.Add(UnknownMember(a.NameRange with { Start = a.NameRange.Start with { Character = a.NameRange.Start.Character + dot + 1 } }, name, owner));
-                    else if (!IsBindingType(prop?.Type))
+                    } else if (!IsBindingType(prop?.Type)) {
                         CheckBinding(el, a, result);
-                }
-                else if (a.Prefix == "" && FindProperty(type, a.LocalName) == null && FindEvent(type, a.LocalName) == null && !HasAvaloniaProperty(type, a.LocalName))
-                {
+                    }
+                } else if (a.Prefix == "" && FindProperty(type, a.LocalName) == null && FindEvent(type, a.LocalName) == null && !HasAvaloniaProperty(type, a.LocalName)) {
                     result.Add(UnknownMember(a.NameRange, a.LocalName, type));
                 }
-                // a binding assigned to a binding-typed property (ItemsControl.DisplayMemberBinding, ...)
-                // is evaluated later against each item, not against this data context
-                else if (!IsBindingType(FindProperty(type, a.LocalName)?.Type))
-                {
+                  // a binding assigned to a binding-typed property (ItemsControl.DisplayMemberBinding, ...)
+                  // is evaluated later against each item, not against this data context
+                  else if (!IsBindingType(FindProperty(type, a.LocalName)?.Type)) {
                     CheckBinding(el, a, result);
                 }
             }
@@ -126,41 +127,46 @@ public sealed class XamlAnalyzer
         return result;
     }
 
-    void CheckBinding(XamlElement el, XamlAttribute a, List<Diagnostic> result)
-    {
-        if (_compilation == null)
+    void CheckBinding(XamlElement el, XamlAttribute a, List<Diagnostic> result) {
+        if (_compilation == null) {
             return;
+        }
+
         var m = BindingRegex.Match(a.Value);
-        if (!m.Success || HasBindingSource(a.Value))
+        if (!m.Success || HasBindingSource(a.Value)) {
             return;
+        }
+
         var dataType = DataTypeOf(el);
-        if (dataType == null)
+        if (dataType == null) {
             return;
+        }
+
         var current = _compilation.GetTypeByMetadataName(dataType);
-        if (current == null)
+        if (current == null) {
             return;
+        }
 
         var path = m.Groups["path"];
         int offset = a.ValueOffset + path.Index;
-        foreach (var segment in path.Value.Split('.'))
-        {
+        foreach (var segment in path.Value.Split('.')) {
             var range = _doc.RangeOf(offset, segment.Length);
             var member = FindMember(current, segment);
-            if (member == null)
-            {
+            if (member == null) {
                 var names = AllMembers(current).Where(s => s is IPropertySymbol or IMethodSymbol { MethodKind: MethodKind.Ordinary } or IFieldSymbol { IsImplicitlyDeclared: false })
                     .Select(s => s.Name).Distinct();
                 result.Add(Make(range, $"Property '{segment}' not found on '{current.Name}'", DiagnosticSeverity.Warning, "AVLS0101", Suggest(segment, names)));
                 return;
             }
-            current = member switch
-            {
+            current = member switch {
                 IPropertySymbol p => p.Type as INamedTypeSymbol,
                 IFieldSymbol f => f.Type as INamedTypeSymbol,
                 _ => null,
             };
-            if (current == null)
+            if (current == null) {
                 return;
+            }
+
             offset += segment.Length + 1;
         }
     }
@@ -168,80 +174,78 @@ public sealed class XamlAnalyzer
     static bool HasBindingSource(string value) =>
         Regex.IsMatch(value, @"\b(ElementName|RelativeSource|Source|DataType)\s*=") || value.Contains('$') || value.Contains('#');
 
-    // ---------------------------------------------------------------- symbol at position
-
-    public XamlSymbol? SymbolAt(Position pos)
-    {
-        foreach (var el in _doc.Elements)
-        {
-            if (XamlDocument.Contains(el.NameRange, pos) && !el.IsPropertyElement)
-            {
+    public XamlSymbol? SymbolAt(Position pos) {
+        foreach (var el in _doc.Elements) {
+            if (XamlDocument.Contains(el.NameRange, pos) && !el.IsPropertyElement) {
                 var t = ResolveType(el.NamespaceUri, el.LocalName);
                 return t != null ? new ElementTypeSymbol(el.NameRange, t) : null;
             }
-            foreach (var a in el.Attributes)
-            {
-                if (XamlDocument.Contains(a.NameRange, pos))
+            foreach (var a in el.Attributes) {
+                if (XamlDocument.Contains(a.NameRange, pos)) {
                     return AttributeSymbol(el, a);
-                if (XamlDocument.Contains(a.ValueRange, pos))
+                }
+
+                if (XamlDocument.Contains(a.ValueRange, pos)) {
                     return ValueSymbol(el, a, pos);
+                }
             }
         }
         return null;
     }
 
-    XamlSymbol? AttributeSymbol(XamlElement el, XamlAttribute a)
-    {
+    XamlSymbol? AttributeSymbol(XamlElement el, XamlAttribute a) {
         var ns = a.Prefix == "" ? el.Namespaces.GetValueOrDefault("", el.NamespaceUri) : a.NamespaceUri;
         MetadataType? owner;
         string name;
         bool attached = a.LocalName.Contains('.');
-        if (attached)
-        {
+        if (attached) {
             var dot = a.LocalName.IndexOf('.');
             owner = ResolveType(ns, a.LocalName[..dot]);
             name = a.LocalName[(dot + 1)..];
-        }
-        else
-        {
+        } else {
             owner = ResolveType(el.NamespaceUri, el.LocalName);
             name = a.LocalName;
         }
-        if (owner == null)
+        if (owner == null) {
             return null;
+        }
+
         var prop = FindProperty(owner, name);
         var ev = prop == null ? FindEvent(owner, name) : null;
         return prop != null || ev != null ? new PropertySymbol(a.NameRange, owner, name, prop, ev, attached) : null;
     }
 
-    XamlSymbol? ValueSymbol(XamlElement el, XamlAttribute a, Position pos)
-    {
-        if (a.NamespaceUri == XamlDocument.XamlNamespace && (a.LocalName == "Class" || a.LocalName == "DataType"))
-        {
+    XamlSymbol? ValueSymbol(XamlElement el, XamlAttribute a, Position pos) {
+        if (a.NamespaceUri == XamlDocument.XamlNamespace && (a.LocalName == "Class" || a.LocalName == "DataType")) {
             var full = a.LocalName == "Class" ? a.Value.Trim() : ResolveTypeFullName(a.Value, el);
             return full != null ? new TypeReferenceSymbol(a.ValueRange, full) : null;
         }
 
         var resource = ResourceRegex.Match(a.Value);
-        if (resource.Success)
+        if (resource.Success) {
             return new ResourceKeySymbol(_doc.RangeOf(a.ValueOffset + resource.Groups["key"].Index, resource.Groups["key"].Length), resource.Groups["key"].Value);
+        }
 
         var binding = BindingRegex.Match(a.Value);
-        if (binding.Success && _compilation != null && !HasBindingSource(a.Value))
-        {
+        if (binding.Success && _compilation != null && !HasBindingSource(a.Value)) {
             var dataType = DataTypeOf(el);
             var current = dataType != null ? _compilation.GetTypeByMetadataName(dataType) : null;
             int offset = a.ValueOffset + binding.Groups["path"].Index;
-            foreach (var segment in binding.Groups["path"].Value.Split('.'))
-            {
-                if (current == null)
+            foreach (var segment in binding.Groups["path"].Value.Split('.')) {
+                if (current == null) {
                     return null;
+                }
+
                 var member = FindMember(current, segment);
-                if (member == null)
+                if (member == null) {
                     return null;
+                }
+
                 var range = _doc.RangeOf(offset, segment.Length);
-                if (XamlDocument.Contains(range, pos))
+                if (XamlDocument.Contains(range, pos)) {
                     return new BindingMemberSymbol(range, member);
+                }
+
                 current = (member as IPropertySymbol)?.Type as INamedTypeSymbol ?? (member as IFieldSymbol)?.Type as INamedTypeSymbol;
                 offset += segment.Length + 1;
             }
@@ -250,54 +254,60 @@ public sealed class XamlAnalyzer
 
         // event handler: Click="OnClick" -> method of x:Class
         var type = ResolveType(el.NamespaceUri, el.LocalName);
-        if (type != null && a.Prefix == "" && !a.LocalName.Contains('.') && FindEvent(type, a.LocalName) != null && Regex.IsMatch(a.Value, @"^\w+$"))
-        {
+        if (type != null && a.Prefix == "" && !a.LocalName.Contains('.') && FindEvent(type, a.LocalName) != null && Regex.IsMatch(a.Value, @"^\w+$")) {
             var root = _doc.Elements.FirstOrDefault();
             var xClass = root?.Attributes.FirstOrDefault(x => x.NamespaceUri == XamlDocument.XamlNamespace && x.LocalName == "Class")?.Value;
-            if (xClass != null)
+            if (xClass != null) {
                 return new EventHandlerSymbol(a.ValueRange, xClass, a.Value);
+            }
         }
         return null;
     }
 
     /// <summary>Offset of x:Key="key" in this document (for resources).</summary>
-    public Range? FindResourceKey(string key)
-    {
-        foreach (var el in _doc.Elements)
-            foreach (var a in el.Attributes)
-                if (a.NamespaceUri == XamlDocument.XamlNamespace && a.LocalName == "Key" && a.Value == key)
+    public Range? FindResourceKey(string key) {
+        foreach (var el in _doc.Elements) {
+            foreach (var a in el.Attributes) {
+                if (a.NamespaceUri == XamlDocument.XamlNamespace && a.LocalName == "Key" && a.Value == key) {
                     return a.ValueRange;
+                }
+            }
+        }
+
         return null;
     }
 
-    // ---------------------------------------------------------------- helpers
-
-    string? DataTypeOf(XamlElement el)
-    {
-        for (var e = el; e != null; e = e.Parent)
-        {
+    string? DataTypeOf(XamlElement el) {
+        for (var e = el; e != null; e = e.Parent) {
             var dt = e.Attributes.FirstOrDefault(a => a.NamespaceUri == XamlDocument.XamlNamespace && a.LocalName == "DataType");
             // data templates also take a plain DataType="..." (Avalonia uses it for compiled bindings)
             var isTemplate = !e.IsPropertyElement && e.LocalName.EndsWith("Template", StringComparison.Ordinal);
-            if (dt == null && isTemplate)
+            if (dt == null && isTemplate) {
                 dt = e.Attributes.FirstOrDefault(a => a.Prefix == "" && a.LocalName == "DataType");
-            if (dt != null)
+            }
+
+            if (dt != null) {
                 return ResolveTypeFullName(dt.Value, e);
+            }
             // the data context of a template without a type is unknown (items, content): do not validate
-            if (isTemplate && e != el)
+            if (isTemplate && e != el) {
                 return null;
+            }
         }
         return null;
     }
 
-    string? ResolveTypeFullName(string value, XamlElement scope)
-    {
+    string? ResolveTypeFullName(string value, XamlElement scope) {
         var q = XamlDocument.ResolveQualified(value, scope);
-        if (q == null)
+        if (q == null) {
             return null;
+        }
+
         var type = ResolveType(q.Value.Uri, q.Value.Name);
-        if (type != null && !string.IsNullOrEmpty(type.FullName))
+        if (type != null && !string.IsNullOrEmpty(type.FullName)) {
             return type.FullName;
+        }
+
         var m = Regex.Match(q.Value.Uri, @"^(?:using:|clr-namespace:)([^;]+)");
         return m.Success ? $"{m.Groups[1].Value.Trim()}.{q.Value.Name}" : null;
     }
@@ -306,14 +316,19 @@ public sealed class XamlAnalyzer
 
     bool NamespaceKnown(string ns) => NamespaceTypes(ns) != null;
 
-    Dictionary<string, MetadataType>? NamespaceTypes(string ns)
-    {
-        if (_metadata == null)
+    Dictionary<string, MetadataType>? NamespaceTypes(string ns) {
+        if (_metadata == null) {
             return null;
-        if (_metadata.Namespaces.TryGetValue(ns, out var types))
+        }
+
+        if (_metadata.Namespaces.TryGetValue(ns, out var types)) {
             return types;
-        if (ns.StartsWith("clr-namespace:") && !ns.Contains(";assembly="))
+        }
+
+        if (ns.StartsWith("clr-namespace:") && !ns.Contains(";assembly=")) {
             return _metadata.Namespaces.FirstOrDefault(kv => kv.Key.StartsWith(ns + ";assembly=")).Value;
+        }
+
         return null;
     }
 
@@ -326,13 +341,17 @@ public sealed class XamlAnalyzer
     /// A type of the project itself that the metadata does not list: internal types (usable from the project's own
     /// XAML) are missing from metadata read from the built assembly.
     /// </summary>
-    bool InCompilation(string ns, string name)
-    {
-        if (_compilation == null)
-            return false;
+    bool InCompilation(string ns, string name) {
         var m = Regex.Match(ns, @"^(?:using:|clr-namespace:)([^;]+)");
-        if (!m.Success)
+        if (!m.Success) {
             return false;
+        }
+        // without a compilation (e.g. the project could not be loaded because global.json asks for a missing SDK),
+        // internal types of the project cannot be checked: do not report types of the project's own namespaces
+        if (_compilation == null) {
+            return !ns.Contains(";assembly=");
+        }
+
         var type = _compilation.GetTypeByMetadataName($"{m.Groups[1].Value.Trim()}.{name}");
         return type != null && (SymbolEqualityComparer.Default.Equals(type.ContainingAssembly, _compilation.Assembly) || type.DeclaredAccessibility == Accessibility.Public);
     }
@@ -345,44 +364,49 @@ public sealed class XamlAnalyzer
     /// The XAML compiler also accepts an attached property with only a "NameProperty" field and a "SetName"
     /// accessor (e.g. a getter named differently), which the metadata does not list; ask the compilation.
     /// </summary>
-    bool HasAvaloniaProperty(MetadataType owner, string name)
-    {
-        if (_compilation == null || string.IsNullOrEmpty(owner.FullName))
+    bool HasAvaloniaProperty(MetadataType owner, string name) {
+        if (_compilation == null || string.IsNullOrEmpty(owner.FullName)) {
             return false;
-        for (INamedTypeSymbol? t = _compilation.GetTypeByMetadataName(owner.FullName); t != null; t = t.BaseType)
-            if (t.GetMembers(name + "Property").Any(m => m.IsStatic) || t.GetMembers("Set" + name).Any(m => m.IsStatic))
+        }
+
+        for (INamedTypeSymbol? t = _compilation.GetTypeByMetadataName(owner.FullName); t != null; t = t.BaseType) {
+            if (t.GetMembers(name + "Property").Any(m => m.IsStatic) || t.GetMembers("Set" + name).Any(m => m.IsStatic)) {
                 return true;
+            }
+        }
+
         return false;
     }
     static MetadataEvent? FindEvent(MetadataType type, string name) => type.Events.FirstOrDefault(e => e.Name == name);
 
-    static IEnumerable<ISymbol> AllMembers(INamedTypeSymbol type)
-    {
-        for (INamedTypeSymbol? t = type; t != null; t = t.BaseType)
-            foreach (var m in t.GetMembers())
+    static IEnumerable<ISymbol> AllMembers(INamedTypeSymbol type) {
+        for (INamedTypeSymbol? t = type; t != null; t = t.BaseType) {
+            foreach (var m in t.GetMembers()) {
                 yield return m;
-        foreach (var i in type.AllInterfaces)
-            foreach (var m in i.GetMembers())
+            }
+        }
+
+        foreach (var i in type.AllInterfaces) {
+            foreach (var m in i.GetMembers()) {
                 yield return m;
+            }
+        }
     }
 
     static ISymbol? FindMember(INamedTypeSymbol type, string name) =>
         AllMembers(type).FirstOrDefault(s => s.Name == name && s is IPropertySymbol or IMethodSymbol or IFieldSymbol { IsImplicitlyDeclared: false });
 
-    Diagnostic UnknownType(Range range, string name, string ns)
-    {
+    Diagnostic UnknownType(Range range, string name, string ns) {
         var names = NamespaceTypes(ns)?.Keys ?? Enumerable.Empty<string>();
         return Make(range, $"Type '{name}' not found in namespace '{ns}'", DiagnosticSeverity.Error, "AVLS0002", Suggest(name, names));
     }
 
-    static Diagnostic UnknownMember(Range range, string name, MetadataType owner)
-    {
+    static Diagnostic UnknownMember(Range range, string name, MetadataType owner) {
         var names = owner.Properties.Select(p => p.Name).Concat(owner.Events.Select(e => e.Name)).Distinct();
         return Make(range, $"Property or event '{name}' not found on '{owner.Name}'", DiagnosticSeverity.Error, "AVLS0003", Suggest(name, names));
     }
 
-    static Diagnostic Make(Range range, string message, DiagnosticSeverity severity, string code, string[]? suggestions = null) => new()
-    {
+    static Diagnostic Make(Range range, string message, DiagnosticSeverity severity, string code, string[]? suggestions = null) => new() {
         Range = range,
         Message = message,
         Severity = severity,
@@ -392,8 +416,7 @@ public sealed class XamlAnalyzer
     };
 
     /// <summary>Closest names (edit distance), best first.</summary>
-    public static string[] Suggest(string name, IEnumerable<string> candidates)
-    {
+    public static string[] Suggest(string name, IEnumerable<string> candidates) {
         int max = Math.Max(2, name.Length / 3);
         return candidates
             .Select(c => (c, d: Distance(name.ToLowerInvariant(), c.ToLowerInvariant())))
@@ -402,19 +425,26 @@ public sealed class XamlAnalyzer
             .Take(3).Select(x => x.c).ToArray();
     }
 
-    static int Distance(string a, string b)
-    {
+    static int Distance(string a, string b) {
         var d = new int[a.Length + 1, b.Length + 1];
-        for (int i = 0; i <= a.Length; i++) d[i, 0] = i;
-        for (int j = 0; j <= b.Length; j++) d[0, j] = j;
-        for (int i = 1; i <= a.Length; i++)
-            for (int j = 1; j <= b.Length; j++)
-            {
+        for (int i = 0; i <= a.Length; i++) {
+            d[i, 0] = i;
+        }
+
+        for (int j = 0; j <= b.Length; j++) {
+            d[0, j] = j;
+        }
+
+        for (int i = 1; i <= a.Length; i++) {
+            for (int j = 1; j <= b.Length; j++) {
                 int cost = a[i - 1] == b[j - 1] ? 0 : 1;
                 d[i, j] = Math.Min(Math.Min(d[i - 1, j] + 1, d[i, j - 1] + 1), d[i - 1, j - 1] + cost);
-                if (i > 1 && j > 1 && a[i - 1] == b[j - 2] && a[i - 2] == b[j - 1])
+                if (i > 1 && j > 1 && a[i - 1] == b[j - 2] && a[i - 2] == b[j - 1]) {
                     d[i, j] = Math.Min(d[i, j], d[i - 2, j - 2] + 1); // transposition
+                }
             }
+        }
+
         return d[a.Length, b.Length];
     }
 }

@@ -1,11 +1,10 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 using System.IO;
 #nullable enable
 
 namespace Avalonia.Ide.CompletionEngine.AssemblyMetadata;
 
-public interface IAssemblyInformation
-{
+public interface IAssemblyInformation {
     string Name { get; }
     IEnumerable<ITypeInformation> Types { get; }
     IEnumerable<ICustomAttributeInformation> CustomAttributes { get; }
@@ -16,19 +15,16 @@ public interface IAssemblyInformation
     string PublicKey { get; }
 }
 
-public interface ICustomAttributeInformation
-{
+public interface ICustomAttributeInformation {
     string TypeFullName { get; }
     IList<IAttributeConstructorArgumentInformation> ConstructorArguments { get; }
 }
 
-public interface IAttributeConstructorArgumentInformation
-{
+public interface IAttributeConstructorArgumentInformation {
     object? Value { get; }
 }
 
-public interface ITypeInformation
-{
+public interface ITypeInformation {
     string FullName { get; }
     string Name { get; }
     string Namespace { get; }
@@ -40,7 +36,7 @@ public interface ITypeInformation
     IEnumerable<IEventInformation> Events { get; }
     IEnumerable<IFieldInformation> Fields { get; }
     IEnumerable<string> Pseudoclasses { get; }
-    IEnumerable<(ITypeInformation Type,string Name)> TemplateParts { get; }
+    IEnumerable<(ITypeInformation Type, string Name)> TemplateParts { get; }
 
     bool IsEnum { get; }
     bool IsStatic { get; }
@@ -53,8 +49,7 @@ public interface ITypeInformation
     IEnumerable<ITypeInformation> NestedTypes { get; }
 }
 
-public interface IMethodInformation
-{
+public interface IMethodInformation {
     bool IsStatic { get; }
     bool IsPublic { get; }
     string Name { get; }
@@ -63,8 +58,7 @@ public interface IMethodInformation
     string QualifiedReturnTypeFullName { get; }
 }
 
-public interface IFieldInformation
-{
+public interface IFieldInformation {
     bool IsStatic { get; }
     bool IsPublic { get; }
     string Name { get; }
@@ -73,14 +67,12 @@ public interface IFieldInformation
     bool IsRoutedEvent { get; }
 }
 
-public interface IParameterInformation
-{
+public interface IParameterInformation {
     string TypeFullName { get; }
     string QualifiedTypeFullName { get; }
 }
 
-public interface IPropertyInformation
-{
+public interface IPropertyInformation {
     bool IsStatic { get; }
     bool IsPublic { get; }
     bool IsInternal { get; }
@@ -92,8 +84,7 @@ public interface IPropertyInformation
     bool IsVisbleTo(IAssemblyInformation assembly);
 }
 
-public interface IEventInformation
-{
+public interface IEventInformation {
     string Name { get; }
     string TypeFullName { get; }
     string QualifiedTypeFullName { get; }

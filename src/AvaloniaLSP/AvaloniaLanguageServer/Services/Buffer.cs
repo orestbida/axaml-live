@@ -1,10 +1,8 @@
 namespace AvaloniaLanguageServer.Services;
 
-public sealed class Buffer
-{
+public sealed class Buffer {
 
-    public string? GetTextTillLine(Position position)
-    {
+    public string? GetTextTillLine(Position position) {
         string[] lines = _text.Split(separator, StringSplitOptions.None);
         string text = string.Join("\n", lines[..position.Line]);
         string line = lines[position.Line][..position.Character];
@@ -12,16 +10,14 @@ public sealed class Buffer
         return position.Line == 0 ? line : $"{text}\n{line}";
     }
 
-    public string? GetLine(Position position)
-    {
+    public string? GetLine(Position position) {
         string[] lines = _text.Split(separator, StringSplitOptions.None);
         return lines[position.Line];
     }
 
     public string GetText() => _text;
 
-    public Buffer(string text)
-    {
+    public Buffer(string text) {
         _text = text;
     }
 

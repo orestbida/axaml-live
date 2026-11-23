@@ -1,14 +1,12 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text.RegularExpressions;
 
 namespace Avalonia.Ide.CompletionEngine;
 
-public class XmlParser
-{
-    public enum ParserState
-    {
+public class XmlParser {
+    public enum ParserState {
         None,
         InsideDeclaration,
         InsideComment,
@@ -64,8 +62,7 @@ public class XmlParser
 
     public bool IsInClosingTag => _isClosingTag;
 
-    public XmlParser(ReadOnlyMemory<char> data, int start = 0)
-    {
+    public XmlParser(ReadOnlyMemory<char> data, int start = 0) {
         _containingTagStart = new Stack<int>();
         _data = data;
         _parserPos = start;
@@ -80,214 +77,165 @@ public class XmlParser
     private const string DeclarationStart = "?";
     private const string DeclarationEnd = "?>";
 
-    private bool CheckPrev(int caret, string checkFor)
-    {
+    private bool CheckPrev(int caret, string checkFor) {
         var startAt = caret - checkFor.Length + 1;
-        if (startAt < 0)
+        if (startAt < 0) {
             return false;
+        }
         // ReSharper disable once LoopCanBeConvertedToQuery
-        for (var c = 0; c < checkFor.Length; c++)
-        {
-            if (_data.Span[c + startAt] != checkFor[c])
+        for (var c = 0; c < checkFor.Length; c++) {
+            if (_data.Span[c + startAt] != checkFor[c]) {
                 return false;
+            }
         }
         return true;
     }
 
-    private bool ParseChar()
-    {
-        if (_parserPos >= _data.Length)
-        {
+    private bool ParseChar() {
+        if (_parserPos >= _data.Length) {
             return false;
         }
 
         var i = _parserPos++;
         var span = _data.Span;
         var c = span[i];
-        if (c == '<' && State == ParserState.None)
-        {
+        if (c == '<' && State == ParserState.None) {
             State = ParserState.StartElement;
             _isClosingTag = _data.Span.Length > i + 1 && span[i + 1] == '/';
             _elementNameStart = i + 1;
             _elementNameEnd = null;
 
             _containingTagStart.Push(i);
-        }
-        else if (State == ParserState.StartElement && CheckPrev(i, DeclarationStart))
-        {
+        } else if (State == ParserState.StartElement && CheckPrev(i, DeclarationStart)) {
             State = ParserState.InsideDeclaration;
-        }
-        else if (State == ParserState.InsideDeclaration && CheckPrev(i, DeclarationEnd))
-        {
+        } else if (State == ParserState.InsideDeclaration && CheckPrev(i, DeclarationEnd)) {
             State = ParserState.None;
-            if (_containingTagStart.Count > 0)
-            {
+            if (_containingTagStart.Count > 0) {
                 _containingTagStart.Pop();
             }
-        }
-        else if (State == ParserState.StartElement && CheckPrev(i, CommentStart))
-        {
+        } else if (State == ParserState.StartElement && CheckPrev(i, CommentStart)) {
             State = ParserState.InsideComment;
-        }
-        else if (State == ParserState.InsideComment && CheckPrev(i, CommentEnd))
-        {
+        } else if (State == ParserState.InsideComment && CheckPrev(i, CommentEnd)) {
             State = ParserState.None;
-            if (_containingTagStart.Count > 0)
-            {
+            if (_containingTagStart.Count > 0) {
                 _containingTagStart.Pop();
             }
-        }
-        else if (State == ParserState.StartElement && CheckPrev(i, CdataStart))
-        {
+        } else if (State == ParserState.StartElement && CheckPrev(i, CdataStart)) {
             State = ParserState.InsideCdata;
-        }
-        else if (State == ParserState.InsideCdata && CheckPrev(i, CdataEnd))
-        {
+        } else if (State == ParserState.InsideCdata && CheckPrev(i, CdataEnd)) {
             State = ParserState.None;
-            if (_containingTagStart.Count > 0)
-            {
+            if (_containingTagStart.Count > 0) {
                 _containingTagStart.Pop();
             }
-        }
-        else if (State == ParserState.StartElement && char.IsWhiteSpace(c))
-        {
+        } else if (State == ParserState.StartElement && char.IsWhiteSpace(c)) {
             State = ParserState.InsideElement;
             _attributeNameStart = i;
             _elementNameEnd = i - 1;
-        }
-        else if ((State == ParserState.InsideElement
-           || State == ParserState.StartElement
-           || State == ParserState.AfterAttributeValue)
-               && c == '/' && CheckPrev(i - 1, "<"))
-        {
-            if (_containingTagStart.Count > 0)
-            {
+        } else if ((State == ParserState.InsideElement
+             || State == ParserState.StartElement
+             || State == ParserState.AfterAttributeValue)
+                 && c == '/' && CheckPrev(i - 1, "<")) {
+            if (_containingTagStart.Count > 0) {
                 _containingTagStart.Pop();
             }
-            if (_containingTagStart.Count > 0)
-            {
+            if (_containingTagStart.Count > 0) {
                 _containingTagStart.Pop();
             }
-        }
-        else if ((State == ParserState.InsideElement
-            || State == ParserState.StartElement
-            || State == ParserState.AfterAttributeValue)
-                && c == '>' && CheckPrev(i - 1, "/"))
-        {
+        } else if ((State == ParserState.InsideElement
+              || State == ParserState.StartElement
+              || State == ParserState.AfterAttributeValue)
+                  && c == '>' && CheckPrev(i - 1, "/")) {
             State = ParserState.None;
-            if (_containingTagStart.Count > 0)
-            {
+            if (_containingTagStart.Count > 0) {
                 _containingTagStart.Pop();
             }
-        }
-        else if ((State == ParserState.InsideElement
-            || State == ParserState.StartElement
-            || State == ParserState.AfterAttributeValue)
-                && c == '>')
-        {
+        } else if ((State == ParserState.InsideElement
+              || State == ParserState.StartElement
+              || State == ParserState.AfterAttributeValue)
+                  && c == '>') {
             State = ParserState.None;
-        }
-        else if (State == ParserState.InsideElement && (char.IsLetter(c) || c == '_' || c == ':'))
-        {
+        } else if (State == ParserState.InsideElement && (char.IsLetter(c) || c == '_' || c == ':')) {
             State = ParserState.StartAttribute;
             _attributeNameStart = i;
             _attributeNameEnd = null;
-        }
-        else if (State == ParserState.InsideElement && c == '<')
-        {
+        } else if (State == ParserState.InsideElement && c == '<') {
             State = ParserState.Error;
-        }
-        else if (State == ParserState.StartAttribute && (c == '=' || char.IsWhiteSpace(c)))
-        {
+        } else if (State == ParserState.StartAttribute && (c == '=' || char.IsWhiteSpace(c))) {
             State = ParserState.BeforeAttributeValue;
             _attributeNameEnd = i - 1;
-        }
-        else if (State == ParserState.BeforeAttributeValue && c == '"')
-        {
+        } else if (State == ParserState.BeforeAttributeValue && c == '"') {
             State = ParserState.AttributeValue;
             _attributeValueStart = i + 1;
-        }
-        else if (State == ParserState.AttributeValue && c == '"')
-        {
+        } else if (State == ParserState.AttributeValue && c == '"') {
             State = ParserState.AfterAttributeValue;
-        }
-        else if (State == ParserState.AfterAttributeValue)
-        {
+        } else if (State == ParserState.AfterAttributeValue) {
             State = ParserState.InsideElement;
-        }
-        else if (State == ParserState.Error && CheckPrev(i - 1, "<"))
-        {
+        } else if (State == ParserState.Error && CheckPrev(i - 1, "<")) {
             State = ParserState.StartElement;
             _parserPos--;
         }
         return true;
     }
 
-    public string? GetParentTagName(int level)
-    {
-        if (State == ParserState.None)
-        {
+    public string? GetParentTagName(int level) {
+        if (State == ParserState.None) {
             level--;
         }
-        if (NestingLevel - level < 0)
+        if (NestingLevel - level < 0) {
             return null;
+        }
+
         var start = _containingTagStart.Skip(level).FirstOrDefault();
         var m = Regex.Match(_data.Span.Slice(start).ToString(), @"^<[^\s/>]+");
-        if (m.Success)
+        if (m.Success) {
             return m.Value.Substring(1);
+        }
+
         return null;
     }
 
-    public string? FindParentAttributeValue(string attributeExpr, int startLevel = 0, int maxLevels = int.MaxValue)
-    {
-        if (NestingLevel - startLevel - 1 < 0)
+    public string? FindParentAttributeValue(string attributeExpr, int startLevel = 0, int maxLevels = int.MaxValue) {
+        if (NestingLevel - startLevel - 1 < 0) {
             return null;
+        }
+
         var attribRegExpr = new Regex($"\\s(?:{attributeExpr})=\"(?<AttribValue>.*?)\"");
-        foreach (var start in _containingTagStart.Skip(startLevel))
-        {
+        foreach (var start in _containingTagStart.Skip(startLevel)) {
             var m = Regex.Match(_data.Span.Slice(start).ToString(), @"^<[^<]+");
-            if (m.Success)
-            {
+            if (m.Success) {
                 var tagNameWithAttributes = m.Value.Substring(1);
                 var attribMatch = attribRegExpr.Match(tagNameWithAttributes);
-                if (attribMatch.Success)
-                {
+                if (attribMatch.Success) {
                     return attribMatch.Groups["AttribValue"].Value;
                 }
             }
-            if (--maxLevels < 0)
+            if (--maxLevels < 0) {
                 break;
+            }
         }
 
         return null;
     }
 
-    public string? ParseCurrentTagName()
-    {
-        if (State < ParserState.StartElement)
-        {
+    public string? ParseCurrentTagName() {
+        if (State < ParserState.StartElement) {
             return null;
         }
         var span = _data.Span;
-        if (_elementNameStart >= span.Length)
-        {
+        if (_elementNameStart >= span.Length) {
             return "";
         }
 
-        if (_elementNameEnd != null)
-        {
+        if (_elementNameEnd != null) {
             return span.Slice(_elementNameStart, _elementNameEnd.Value - _elementNameStart + 1).ToString();
         }
 
         var endTag = _elementNameEnd;
-        for (var i = _elementNameStart; i < span.Length; i++)
-        {
+        for (var i = _elementNameStart; i < span.Length; i++) {
             char c = span[i];
             var isClosingTag = i == _elementNameStart && c == '/';
-            if (!isClosingTag)
-            {
-                if (char.IsWhiteSpace(c) || c == '/' || c == '>')
-                {
+            if (!isClosingTag) {
+                if (char.IsWhiteSpace(c) || c == '/' || c == '>') {
                     endTag = i;
                     break;
                 }
@@ -295,34 +243,27 @@ public class XmlParser
 
             endTag = i + 1;
         }
-        if (endTag is null)
-        {
+        if (endTag is null) {
             return null;
         }
         return span.Slice(_elementNameStart, endTag.Value - _elementNameStart).ToString();
     }
 
-    public static XmlParser Parse(string data)
-    {
+    public static XmlParser Parse(string data) {
         return Parse(data.AsMemory());
     }
 
-    public static XmlParser Parse(ReadOnlyMemory<char> data)
-    {
+    public static XmlParser Parse(ReadOnlyMemory<char> data) {
         return Parse(data, 0, data.Length);
     }
 
-    public static XmlParser Parse(ReadOnlyMemory<char> data, int start, int end)
-    {
+    public static XmlParser Parse(ReadOnlyMemory<char> data, int start, int end) {
         var rv = new XmlParser(data, 0);
-        while(rv.ParserPos < start)
-        {
+        while (rv.ParserPos < start) {
             rv.ParseChar();
         }
-        for (var i = start; i < end; i++)
-        {
-            if (!rv.ParseChar())
-            {
+        for (var i = start; i < end; i++) {
+            if (!rv.ParseChar()) {
                 break;
             }
         }
@@ -333,31 +274,24 @@ public class XmlParser
     /// <summary>
     /// Try parsing until closing tag is found
     /// </summary>
-    public bool SeekClosingTag()
-    {
-        while (State == ParserState.StartElement)
-        {
-            if (!ParseChar())
-            {
+    public bool SeekClosingTag() {
+        while (State == ParserState.StartElement) {
+            if (!ParseChar()) {
                 return false;
             }
             // leave initial start element
         }
 
         var currentLevel = NestingLevel;
-        while (NestingLevel >= currentLevel)
-        {
-            if (!ParseChar())
-            {
+        while (NestingLevel >= currentLevel) {
+            if (!ParseChar()) {
                 return false;
             }
             // find next element at same level in document
         }
 
-        while (State != ParserState.StartElement)
-        {
-            if (!ParseChar())
-            {
+        while (State != ParserState.StartElement) {
+            if (!ParseChar()) {
                 return false;
             }
             // find start of next element
@@ -366,8 +300,7 @@ public class XmlParser
         return NestingLevel < currentLevel;
     }
 
-    public override string ToString()
-    {
+    public override string ToString() {
         return $"State: {State}, TagName: {TagName}, AttributeName: {AttributeName}, Attribute: {AttributeValue}, ContainingTagStart: {ContainingTagStart}";
     }
 
@@ -375,8 +308,7 @@ public class XmlParser
     /// Clone this parser state
     /// </summary>
     /// <returns></returns>
-    public XmlParser Clone()
-    {
+    public XmlParser Clone() {
         var newParser = (XmlParser)MemberwiseClone();
         var clonedStack = new Stack<int>(new Stack<int>(_containingTagStart));
         newParser._containingTagStart = clonedStack;
