@@ -63,4 +63,24 @@ node out/test/e2e/runE2E.js /tmp/E2EApp "<path to Code executable>"
 
 Optional environment variables: `E2E_AXAML` (file to preview, default `MainWindow.axaml`), `E2E_BUILD_TARGET`
 (project for the external build, e.g. the Desktop head of an xplat solution), `E2E_PAUSE_MS`,
-`E2E_SCREENSHOT_DIR` (Windows: desktop screenshot per checkpoint).
+`E2E_SCREENSHOT_DIR` (Windows: desktop screenshot per checkpoint), `E2E_GREP` (run matching tests only).
+
+### Remote (WSL)
+
+The same tests run with the extension host on Linux and the UI on Windows (Remote - WSL extension required):
+
+```bash
+# in WSL: a copy of the built extension and a test project
+mkdir -p ~/avalonia-ext && (cd /mnt/c/<repo>/src/vscode-avalonia && tar --exclude=./src --exclude=./.vscode-test -cf - . | tar -xf - -C ~/avalonia-ext)
+dotnet new avalonia.mvvm -o ~/avalonia-e2e/WslApp -f net10.0
+```
+
+```powershell
+# on Windows
+$env:E2E_REMOTE = "wsl+Ubuntu-22.04"; $env:E2E_REMOTE_EXTENSION = "/home/<user>/avalonia-ext"
+node out/test/e2e/runE2E.js /home/<user>/avalonia-e2e/WslApp "<path to Code.exe>"
+```
+
+Environment variables don't reach the remote test host; put settings in `~/avalonia-ext/out/test/e2e/e2e.config.json`,
+e.g. `{ "E2E_PAUSE_MS": 2500, "E2E_SCREENSHOT_DIR": "C:\\temp\\shots" }` (screenshots via `powershell.exe` interop).
+Test output is in the WSL server log: `~/.vscode-server/data/logs/<date>/exthost1/remoteexthost.log`.

@@ -3,11 +3,13 @@ import * as path from "path";
 import * as fs from "fs";
 import * as http from "http";
 import * as vscode from "vscode";
-import { execFile, spawnSync } from "child_process";
+import { execFile } from "child_process";
+import { e2eSetting, windowsScreenshot } from "./config";
 
-const workspace = process.env.E2E_WORKSPACE!;
-const shotDir = process.env.E2E_SCREENSHOT_DIR;
-const pauseMs = Number(process.env.E2E_PAUSE_MS ?? 2500);
+const workspace = e2eSetting("E2E_WORKSPACE") ?? vscode.workspace.workspaceFolders![0].uri.fsPath;
+const shotDir = e2eSetting("E2E_SCREENSHOT_DIR");
+const pauseMs = Number(e2eSetting("E2E_PAUSE_MS") ?? 2500);
+const buildTarget = e2eSetting("E2E_BUILD_TARGET");
 
 type State = {
 	panel: boolean;
@@ -40,17 +42,8 @@ let shot = 0;
 async function checkpoint(name: string) {
 	console.log(`[e2e] checkpoint: ${name} ${JSON.stringify(await state())}`);
 	await sleep(pauseMs);
-	if (shotDir && process.platform === "win32") {
-		fs.mkdirSync(shotDir, { recursive: true });
-		const file = path.join(shotDir, `${String(++shot).padStart(2, "0")}-${name}.png`);
-		const ps =
-			"Add-Type -AssemblyName System.Windows.Forms,System.Drawing;" +
-			"$b=[System.Windows.Forms.SystemInformation]::VirtualScreen;" +
-			"$bmp=New-Object System.Drawing.Bitmap $b.Width,$b.Height;" +
-			"$g=[System.Drawing.Graphics]::FromImage($bmp);" +
-			"$g.CopyFromScreen($b.Left,$b.Top,0,0,$bmp.Size);" +
-			`$bmp.Save('${file}');$g.Dispose();$bmp.Dispose()`;
-		spawnSync("powershell", ["-NoProfile", "-Command", ps]);
+	if (shotDir) {
+		windowsScreenshot(shotDir, `${String(++shot).padStart(2, "0")}-${name}.png`);
 	}
 }
 
@@ -71,7 +64,7 @@ function findAxaml(name: string): string {
 
 function dotnetBuild(): Promise<{ code: number; out: string }> {
 	return new Promise((resolve) => {
-		execFile("dotnet", ["build", ...(process.env.E2E_BUILD_TARGET ? [process.env.E2E_BUILD_TARGET] : []), "-nologo", "-v", "q"], { cwd: workspace }, (err, stdout, stderr) =>
+		execFile("dotnet", ["build", ...(buildTarget ? [buildTarget] : []), "-nologo", "-v", "q"], { cwd: workspace }, (err, stdout, stderr) =>
 			resolve({ code: err ? ((err as any).code ?? 1) : 0, out: stdout + stderr })
 		);
 	});
@@ -80,7 +73,7 @@ function dotnetBuild(): Promise<{ code: number; out: string }> {
 const noXamlError = (s: State) => !!s.lastXaml && !s.lastXaml.error && !s.lastXaml.message;
 
 suite("Avalonia previewer (e2e)", () => {
-	const mainWindow = findAxaml(process.env.E2E_AXAML ?? "MainWindow.axaml");
+	const mainWindow = findAxaml(e2eSetting("E2E_AXAML") ?? "MainWindow.axaml");
 	let editor: vscode.TextEditor;
 
 	suiteSetup(async () => {
