@@ -1,62 +1,64 @@
-# Contribution Guide
+# Contributing
 
-Welcome to Avalonia Extension for VS Code! We appreciate your interest in contributing. This guide will help you get started with contributing to our project. Please read it carefully.
+Thanks for helping with AXAML Live. This page explains how to build, run and test the extension.
 
-## System Requirements
+## Requirements
 
-1. dotnet 9.0, you can download it from [here](https://dotnet.microsoft.com/en-us/download)
-2. NodeJS, npm 
-   You can get NodeJS and npm using NVM (Node Version Manager) by running the following command:
-   
-    `curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash`
-
-   See: https://github.com/nvm-sh/nvm for the latest version of this command.
-
-3. Install yarn
-   yarn can be installed with the following command:
-    
-    `npm install -g yarn`
-
-4. Latest Visual Studio Code
+1. .NET SDK 10.0 or newer: https://dotnet.microsoft.com/download (it also builds the net8.0 and netstandard parts)
+2. Node.js 20 or newer, with npm
+3. Visual Studio Code
+4. On Windows, Git Bash to run the build script
 
 ## Set up
 
-1. Fork and clone the repository (no submodules: the completion engine and the solution parser are vendored,
-   see `src/AvaloniaVS/VENDORED.md` and `src/SolutionParser/VENDORED.md`)
+1. Clone the repository. There are no submodules: the completion engine and the solution parser are part of the
+   repository, see `src/AvaloniaVS/VENDORED.md` and `src/SolutionParser/VENDORED.md`.
+2. Run `bash build.sh` from the repository root. It installs the npm packages, compiles the extension and builds the
+   language server and the solution parser in Release mode.
 
-2. Run `build.sh` (on Windows from Git Bash)
+## Run and debug
+
+Open the repository in VS Code and press F5. A new VS Code window starts with the extension; open an Avalonia project
+there.
+
+## Checks
+
+```bash
+cd src/AxamlLive
+npm run lint
+npm run test:unit
+```
+
+GitHub Actions runs the same checks on Windows and Linux for every push and pull request
+(`.github/workflows/ci.yml`) and uploads the VSIX as a build artifact.
+
+## Package
+
+```bash
+bash build.sh
+cd src/AxamlLive
+npx @vscode/vsce package
+```
+
+Or run the **Package Extension** task in VS Code. Releases are built by `.github/workflows/release.yml` when a
+version tag (for example `v0.2.0`) is pushed; see the README.
 
 ## How to contribute
 
-1. Create a new issue or use the existing to contribute (assign it yourself)
-2. Create a new branch for the issue
-3. Send the PR with description
-
-## Run and Debug
-
-Hit `F5` this will a new vscode window with the dev extension running. Open an avalonia project to use it.
-
-## Package Extension
-
-Make sure you run the `build.sh` before packaging and you have `vsce` installed. If you do not, run the following command: 
-
-```bash
-npm install -g @vscode/vsce
-```
-
-1. Open command palette (shift + cmd + p)
-2. Select `Task: Run Task`
-3. Select `Package Extension`
+1. Open an issue, or comment on an existing one.
+2. Create a branch and keep commits small. Commit titles use conventional commits, for example
+   `fix: preview stays empty after a rebuild` or `feat: add a background setting`.
+3. Open a pull request with a short description of the change and how you tested it.
 
 ## End-to-end tests
 
-`src/vscode-avalonia/src/test/e2e` drives a real, visible VS Code window against an Avalonia project:
+`src/AxamlLive/src/test/e2e` drives a real, visible VS Code window against an Avalonia project:
 show preview (auto build), live edit, XAML error reporting, external `dotnet build` while previewing, Build/Restart
 commands, code completion (also after a rebuild), switching files and closing the preview.
 
 ```bash
-cd src/vscode-avalonia
-yarn compile
+cd src/AxamlLive
+npm run compile
 dotnet new avalonia.mvvm -o /tmp/E2EApp
 node out/test/e2e/runE2E.js /tmp/E2EApp "<path to Code executable>"
 ```
@@ -71,7 +73,7 @@ The same tests run with the extension host on Linux and the UI on Windows (Remot
 
 ```bash
 # in WSL: a copy of the built extension and a test project
-mkdir -p ~/avalonia-ext && (cd /mnt/c/<repo>/src/vscode-avalonia && tar --exclude=./src --exclude=./.vscode-test -cf - . | tar -xf - -C ~/avalonia-ext)
+mkdir -p ~/avalonia-ext && (cd /mnt/c/<repo>/src/AxamlLive && tar --exclude=./src --exclude=./.vscode-test -cf - . | tar -xf - -C ~/avalonia-ext)
 dotnet new avalonia.mvvm -o ~/avalonia-e2e/WslApp -f net10.0
 ```
 
