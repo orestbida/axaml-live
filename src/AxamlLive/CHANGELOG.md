@@ -7,7 +7,7 @@ All notable changes to AXAML Live are documented in this file.
 Previewer:
 
 - Frames are rendered by the extension (canvas) instead of the designer's HTML page: works remotely without port forwarding.
-- Sharp zoom (the designer renders at zoom x screen scale), Fit All / Fit Width.
+- Zoom renders at the zoomed size (zoom x screen scale); Fit All and Fit Width.
 - Theme switch (app theme / Light / Dark) and form factors (desktop, laptop, phones, tablets) with rotation; applied to the
   XAML sent to the previewer only.
 - Mouse, wheel and keyboard input with a toggle; FPS limit; auto-open; previewer host from launch.json.

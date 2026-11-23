@@ -1,11 +1,10 @@
 # AXAML Live
 
-Live preview and editor features for Avalonia XAML (`.axaml`) files in Visual Studio Code: a previewer that updates
-while you type, completion, diagnostics, hover, go to definition and a formatter.
+A Visual Studio Code extension for Avalonia XAML (`.axaml`) files: a previewer, completion, diagnostics, hover, go
+to definition and a formatter.
 
-AXAML Live is a free, MIT-licensed community project, based on the archived open source
-[AvaloniaVSCode](https://github.com/AvaloniaUI/AvaloniaVSCode) extension. No account, no telemetry, no C# Dev Kit
-needed.
+It is based on the archived [AvaloniaVSCode](https://github.com/AvaloniaUI/AvaloniaVSCode) extension and is licensed
+under MIT.
 
 ![Live preview of an .axaml file in VS Code](docs/images/screenshot.png)
 
@@ -37,37 +36,37 @@ Open the folder, open an `.axaml` file and click **Show preview** in the editor 
 
 ## Previewer
 
-- **Live**: changes show while you type, no need to save.
-- **Interactive**: mouse, wheel and keyboard go to the previewed UI (turn this off with the mouse button in the toolbar).
-- **Sharp zoom**: -/+, Ctrl+Wheel, Fit All, Fit Width. The preview is rendered at the zoomed size, not scaled up.
-- **Theme**: preview in the app theme, Light or Dark.
-- **Device sizes**: desktop, laptop, phones and tablets, also rotated. Only the preview changes, not your file.
-- **Design data**: a view with `x:DataType` (or named like `Views/FooView` with a `ViewModels/FooViewModel`) and no
-  `Design.DataContext` is previewed with a new instance of its view model, so bindings show data. If the view model
-  cannot be created (for example it needs constructor arguments), the preview says so and shows the view without data.
-- **Background**: show transparent views on a light, dark or custom color (`axamlLive.previewer.background`).
-- **Builds just work**: the previewer runs from a copy of your build output, so `dotnet build` is never blocked by
-  locked files. After any build (toolbar **Build**, terminal, C# Dev Kit) the preview reloads by itself.
-- **Errors**: XAML errors are shown under the preview and in the Problems view. If code in your app throws while
-  previewing (for example in `OnLoaded`), the preview shows what crashed and starts again.
-- **Remote**: works over WSL, SSH and in containers without port forwarding; only the changed part of each frame is sent.
-- **.xaml files** that belong to an Avalonia project get the preview and the editor features too.
-- One preview follows the active editor. XAML in a library is previewed through an app that references it. Choose
-  another app with **AXAML Live: Select previewer host project** (or click the project name in the preview toolbar), the
-  `axamlLive.previewer.hostProject` setting, or from `.vscode/launch.json` (`axamlLive.previewer.syncWithLaunchConfig`).
+- The preview updates while you type; saving is not needed.
+- Mouse, wheel and keyboard input is sent to the previewed UI. The mouse button in the toolbar turns this off.
+- Zoom with -/+ or Ctrl+Wheel, or use Fit All and Fit Width. The preview is rendered at the zoomed size.
+- Theme: the app theme, Light or Dark.
+- Device sizes: desktop, laptop, phones and tablets, also rotated. Only the preview changes, not the file.
+- Design data: a view with `x:DataType` (or named like `Views/FooView` with a `ViewModels/FooViewModel`) and no
+  `Design.DataContext` is previewed with a new instance of its view model. If the view model cannot be created, for
+  example because it needs constructor arguments, the preview shows the view without data and says why.
+- Background for transparent views: light, dark or a custom color (`axamlLive.previewer.background`).
+- The previewer runs from a copy of the build output, so `dotnet build` is not blocked by locked files. After a build
+  (toolbar **Build**, terminal, C# Dev Kit) the preview reloads.
+- XAML errors are shown under the preview and in the Problems view. If code in the app throws while previewing (for
+  example in `OnLoaded`), the preview shows the error and the previewer restarts.
+- Works over Remote - WSL, Remote - SSH and in containers.
+- `.xaml` files that belong to an Avalonia project are supported too.
+- One preview follows the active editor. XAML in a library is previewed through an app that references it. To choose
+  another app, use **AXAML Live: Select previewer host project** (or click the project name in the preview toolbar),
+  the `axamlLive.previewer.hostProject` setting, or `.vscode/launch.json` (`axamlLive.previewer.syncWithLaunchConfig`).
 
 ## Editing AXAML
 
-- **Completion** for elements, properties, markup extensions, resources and `x:` directives.
-- **Diagnostics without building**: unknown types, properties, events and binding paths (`x:DataType`), with
-  **quick fixes** (for example "Change to 'Button'").
-- **Hover**: types and properties with their documentation.
-- **Go to definition**: `x:Class`, `x:DataType`, types, binding members, event handlers and resource keys.
-- **Source-generated members** (for example CommunityToolkit `[ObservableProperty]`) are known as soon as the C#
-  file is saved, without a build.
-- **Show Code-behind** (F7) and **Show ViewModel** (Shift+F7).
-- **Format Document** with attribute wrapping, markup extension wrapping, blank line handling and quote style.
-- **Style badges** after elements that a `Style` in the same file applies to; hover a badge to see the selectors.
+- Completion for elements, properties, markup extensions, resources and `x:` directives.
+- Diagnostics without building: unknown types, properties, events and binding paths (`x:DataType`), with quick fixes
+  (for example "Change to 'Button'").
+- Hover with type and property documentation.
+- Go to definition for `x:Class`, `x:DataType`, types, binding members, event handlers and resource keys.
+- Source-generated members (for example CommunityToolkit `[ObservableProperty]`) are known after the C# file is saved,
+  without a build.
+- Show Code-behind (F7) and Show ViewModel (Shift+F7).
+- Format Document, with options for attribute wrapping, markup extension wrapping, blank lines and quote style.
+- Style badges after elements that a `Style` in the same file applies to; hovering a badge shows the selectors.
 
 ## Settings
 
