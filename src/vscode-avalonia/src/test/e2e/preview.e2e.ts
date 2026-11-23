@@ -562,6 +562,145 @@ suite("Avalonia previewer (e2e)", () => {
 		}
 	});
 
+	// ---------- language server: diagnostics, code fixes, hover, definition, generated members ----------
+	const lspFile = path.join(path.dirname(mainWindow), "E2eLsp.axaml");
+	const mainText = () => fs.readFileSync(mainWindow, "utf8");
+	const vmName = () => /x:DataType="\w+:(\w+)"/.exec(mainText())?.[1] ?? "MainViewModel";
+	const vmNamespace = () => /xmlns:vm="using:([\w.]+)"/.exec(mainText())?.[1] ?? "";
+	const isCSharp = () => fs.existsSync(mainWindow + ".cs");
+	let lspDoc: vscode.TextDocument;
+	const avaloniaDiagnostics = () =>
+		vscode.languages.getDiagnostics(lspDoc.uri).filter((d) => d.source === "Avalonia");
+	const posOf = (text: string, delta = 1) => lspDoc.positionAt(lspDoc.getText().indexOf(text) + delta);
+	const waitForDiagnostics = async (what: string, pred: (d: vscode.Diagnostic[]) => boolean, timeout = 90000) => {
+		const end = Date.now() + timeout;
+		while (!pred(avaloniaDiagnostics())) {
+			if (Date.now() > end) {
+				throw new Error(`Timed out waiting for diagnostics: ${what}. Got: ${avaloniaDiagnostics().map((d) => d.message).join(" | ")}`);
+			}
+			await sleep(500);
+		}
+		return avaloniaDiagnostics();
+	};
+
+	test("XAML diagnostics without building (unknown types, properties, binding paths)", async () => {
+		fs.writeFileSync(
+			lspFile,
+			`<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:${vmNamespace()}"
+             x:DataType="vm:${vmName()}">
+    <StackPanel>
+        <Button Content="{Binding Greeting}"/>
+        <Buton Content="x"/>
+        <Button Contnet="x"/>
+        <TextBlock Text="{Binding Greting}"/>
+        <TextBlock Text="{Binding E2eGenerated}"/>
+    </StackPanel>
+</UserControl>
+`
+		);
+		lspDoc = await vscode.workspace.openTextDocument(lspFile);
+		await vscode.window.showTextDocument(lspDoc, vscode.ViewColumn.One);
+		const diags = await waitForDiagnostics("Buton, Contnet, Greting", (d) =>
+			["Buton", "Contnet", "Greting"].every((w) => d.some((x) => x.message.includes(w)))
+		);
+		console.log(`[e2e] diagnostics: ${diags.map((d) => `${d.range.start.line + 1}: ${d.message}`).join(" | ")}`);
+		assert.ok(!diags.some((d) => d.message.includes("'Greeting'")), "valid binding reported");
+		assert.ok(!diags.some((d) => /StackPanel|UserControl/.test(d.message)), "valid elements reported");
+		const buton = diags.find((d) => d.message.includes("Buton"))!;
+		assert.strictEqual(lspDoc.getText(buton.range), "Buton");
+		await checkpoint("lsp-diagnostics");
+	});
+
+	test("code fixes for unknown names", async () => {
+		const buton = avaloniaDiagnostics().find((d) => d.message.includes("Buton"))!;
+		const actions = await vscode.commands.executeCommand<vscode.CodeAction[]>("vscode.executeCodeActionProvider", lspDoc.uri, buton.range);
+		const fix = actions.find((a) => /Button/.test(a.title));
+		assert.ok(fix?.edit, `no fix among: ${actions.map((a) => a.title).join(", ")}`);
+		await vscode.workspace.applyEdit(fix!.edit!);
+		assert.ok(lspDoc.getText().includes("<Button Content=\"x\"/>"));
+		await waitForDiagnostics("Buton fixed", (d) => !d.some((x) => x.message.includes("Buton")), 30000);
+		const prop = avaloniaDiagnostics().find((d) => d.message.includes("Contnet"))!;
+		const propFix = (await vscode.commands.executeCommand<vscode.CodeAction[]>("vscode.executeCodeActionProvider", lspDoc.uri, prop.range)).find((a) => /Content/.test(a.title));
+		assert.ok(propFix?.edit, "no property fix");
+	});
+
+	test("hover on elements and attributes", async () => {
+		const hoverText = async (pos: vscode.Position) => {
+			const hovers = await vscode.commands.executeCommand<vscode.Hover[]>("vscode.executeHoverProvider", lspDoc.uri, pos);
+			return hovers.flatMap((h) => h.contents.map((c) => (typeof c === "string" ? c : (c as vscode.MarkdownString).value))).join("\n");
+		};
+		const element = await hoverText(posOf("<Button Content", 2));
+		console.log(`[e2e] hover element: ${element.replace(/\s+/g, " ").substring(0, 160)}`);
+		assert.match(element, /Avalonia\.Controls\.Button/);
+		const attribute = await hoverText(posOf("Content=\"{Binding Greeting", 2));
+		console.log(`[e2e] hover attribute: ${attribute.replace(/\s+/g, " ").substring(0, 160)}`);
+		assert.match(attribute, /Content/);
+		const binding = await hoverText(posOf("Greeting}", 2));
+		assert.match(binding, /Greeting/);
+	});
+
+	test("go to definition (x:DataType, binding path, x:Class)", async () => {
+		const definition = async (doc: vscode.TextDocument, pos: vscode.Position) => {
+			const locs = await vscode.commands.executeCommand<(vscode.Location | vscode.LocationLink)[]>("vscode.executeDefinitionProvider", doc.uri, pos);
+			const l = locs?.[0];
+			return l ? ("targetUri" in l ? { uri: l.targetUri, range: l.targetRange } : { uri: l.uri, range: l.range }) : undefined;
+		};
+		const vm = await definition(lspDoc, posOf(`vm:${vmName()}"`, 4));
+		assert.ok(vm, "no definition for x:DataType");
+		const vmDoc = await vscode.workspace.openTextDocument(vm!.uri);
+		assert.match(vmDoc.lineAt(vm!.range.start.line).text, new RegExp(`\\b${vmName()}\\b`));
+		const prop = await definition(lspDoc, posOf("Greeting}", 2));
+		assert.ok(prop, "no definition for binding path");
+		assert.match((await vscode.workspace.openTextDocument(prop!.uri)).lineAt(prop!.range.start.line).text, /Greeting/);
+		const mainDoc = await vscode.workspace.openTextDocument(mainWindow);
+		const cls = await definition(mainDoc, mainDoc.positionAt(mainDoc.getText().indexOf("x:Class=\"") + 12));
+		assert.ok(cls, "no definition for x:Class");
+		assert.ok(/MainWindow\.axaml\.(cs|fs)$/.test(cls!.uri.fsPath), `x:Class -> ${cls!.uri.fsPath}`);
+		await vscode.window.showTextDocument(lspDoc, vscode.ViewColumn.One);
+	});
+
+	test("source-generated view model members are known without building", async function (this: Mocha.Context) {
+		if (!isCSharp()) {
+			await vscode.window.showTextDocument(lspDoc, vscode.ViewColumn.One);
+			await vscode.commands.executeCommand("workbench.action.revertAndCloseActiveEditor");
+			fs.rmSync(lspFile, { force: true });
+			await showMain();
+			this.skip();
+		}
+		const vmFile = [path.join(workspace, "ViewModels", `${vmName()}.cs`), path.join(workspace, path.basename(workspace), "ViewModels", `${vmName()}.cs`)].find((f) => fs.existsSync(f))!;
+		const original = fs.readFileSync(vmFile, "utf8");
+		const builtDll = fs.statSync(path.join(workspace, "bin")).mtimeMs;
+		try {
+			assert.ok(avaloniaDiagnostics().some((d) => d.message.includes("E2eGenerated")), "E2eGenerated should be unknown before the change");
+			const changed = original.replace(/(class\s+\w+[^{]*\{)/, `$1\n    [CommunityToolkit.Mvvm.ComponentModel.ObservableProperty] private string _e2eGenerated = "gen";\n`);
+			const vmDoc = await vscode.workspace.openTextDocument(vmFile);
+			const ed = await vscode.window.showTextDocument(vmDoc, vscode.ViewColumn.One);
+			await ed.edit((e) => e.replace(new vscode.Range(vmDoc.positionAt(0), vmDoc.positionAt(vmDoc.getText().length)), changed));
+			await vmDoc.save();
+			await vscode.window.showTextDocument(lspDoc, vscode.ViewColumn.One);
+			await waitForDiagnostics("E2eGenerated known", (d) => !d.some((x) => x.message.includes("E2eGenerated")) && d.some((x) => x.message.includes("Greting")), 120000);
+			const hovers = await vscode.commands.executeCommand<vscode.Hover[]>("vscode.executeHoverProvider", lspDoc.uri, posOf("E2eGenerated}", 2));
+			const text = hovers.flatMap((h) => h.contents.map((c) => (typeof c === "string" ? c : (c as vscode.MarkdownString).value))).join(" ");
+			console.log(`[e2e] hover generated: ${text.replace(/\s+/g, " ").substring(0, 160)}`);
+			assert.match(text, /E2eGenerated/);
+			assert.match(text, /string/i);
+			assert.strictEqual(fs.statSync(path.join(workspace, "bin")).mtimeMs, builtDll, "must not need a build");
+			await checkpoint("lsp-generated");
+		} finally {
+			const vmDoc = await vscode.workspace.openTextDocument(vmFile);
+			const ed = await vscode.window.showTextDocument(vmDoc, vscode.ViewColumn.One);
+			await ed.edit((e) => e.replace(new vscode.Range(vmDoc.positionAt(0), vmDoc.positionAt(vmDoc.getText().length)), original));
+			await vmDoc.save();
+			await vscode.commands.executeCommand("workbench.action.closeActiveEditor");
+			await vscode.window.showTextDocument(lspDoc, vscode.ViewColumn.One);
+			await vscode.commands.executeCommand("workbench.action.revertAndCloseActiveEditor");
+			fs.rmSync(lspFile, { force: true });
+			await showMain();
+		}
+	});
+
 	test("Restart command", async () => {
 		const started = (await state()).sessionsStarted;
 		await vscode.commands.executeCommand("avalonia.restartPreviewer");

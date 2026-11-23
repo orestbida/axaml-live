@@ -12,6 +12,10 @@ public class BufferService
         _buffers.TryAdd(key, new Buffer(text));
     }
 
+    public string? GetText(DocumentUri key) => _buffers.TryGetValue(key, out var b) ? b.GetText() : null;
+
+    public IReadOnlyCollection<DocumentUri> Uris => _buffers.Keys.ToArray();
+
     public void Remove(DocumentUri key)
     {
         _buffers.TryRemove(key, out _);

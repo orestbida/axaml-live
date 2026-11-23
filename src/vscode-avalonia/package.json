@@ -3,7 +3,7 @@
   "displayName": "Avalonia for VSCode (Community)",
   "description": "Community-maintained MIT Avalonia tools for VS Code: AXAML completion and live previewer",
   "publisher": "AvaloniaCommunity",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "license": "MIT",
   "preview": true,
   "qna": "false",

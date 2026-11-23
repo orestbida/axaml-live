@@ -2,6 +2,28 @@
 
 All notable changes to the "vscode-avalonia" extension will be documented in this file.
 
+## [0.2.0] - 23 November 2026
+
+Previewer:
+
+- Frames are rendered by the extension (canvas) instead of the designer's HTML page: works remotely without port forwarding.
+- Sharp zoom (the designer renders at zoom × screen scale), Fit All / Fit Width.
+- Theme switch (app theme / Light / Dark) and form factors (desktop, laptop, phones, tablets) with rotation; applied to the
+  XAML sent to the previewer only.
+- Mouse, wheel and keyboard input with a toggle; FPS limit; auto-open; previewer host from launch.json.
+- Native runtimes come from an immutable per-platform cache: builds never hit locked native DLLs.
+
+Language features:
+
+- Diagnostics without building (unknown types, properties, events, compiled binding paths) with quick fixes.
+- Hover with documentation; go to definition (x:Class, x:DataType, types, binding members, event handlers, resources).
+- The language server compiles projects in memory (Roslyn): source-generated members are known without building.
+- Show Code-behind (F7) / Show ViewModel (Shift+F7), Run / Debug project, install/update templates.
+- XAML formatter (attribute and markup extension wrapping, quote style, blank lines); quote style for completions.
+- 🎨 badges for elements matched by Styles in the same file.
+
+The language server now targets .NET 10 (Roslyn 5).
+
 ## [0.1.0] - 23 November 2026
 
 Community fork of the archived MIT extension. The previewer was rewritten for reliability; issue numbers refer to

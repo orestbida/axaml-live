@@ -2,13 +2,15 @@
 
     <PropertyGroup>
         <OutputType>Exe</OutputType>
-        <TargetFramework>net8.0</TargetFramework>
+        <TargetFramework>net10.0</TargetFramework>
         <RollForward>LatestMajor</RollForward>
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
     </PropertyGroup>
 
     <ItemGroup>
+        <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Workspaces" Version="5.12.0" />
+        <PackageReference Include="Microsoft.CodeAnalysis.Workspaces.MSBuild" Version="5.12.0" />
         <PackageReference Include="Microsoft.VisualStudio.LanguageServer.Protocol" Version="17.2.8" />
         <PackageReference Include="OmniSharp.Extensions.LanguageProtocol" Version="0.19.7" />
         <PackageReference Include="OmniSharp.Extensions.LanguageServer" Version="0.19.7" />
@@ -19,9 +21,7 @@
     </ItemGroup>
 
     <ItemGroup>
-        <ProjectReference
-            Include="..\..\AvaloniaVS\CompletionEngine\Avalonia.Ide.CompletionEngine.DnlibMetadataProvider\Avalonia.Ide.CompletionEngine.DnlibMetadataProvider.csproj" />
-        <ProjectReference
-            Include="..\..\AvaloniaVS\CompletionEngine\Avalonia.Ide.CompletionEngine\Avalonia.Ide.CompletionEngine.csproj" />
+        <ProjectReference Include="..\..\AvaloniaVS\CompletionEngine\Avalonia.Ide.CompletionEngine.DnlibMetadataProvider\Avalonia.Ide.CompletionEngine.DnlibMetadataProvider.csproj" />
+        <ProjectReference Include="..\..\AvaloniaVS\CompletionEngine\Avalonia.Ide.CompletionEngine\Avalonia.Ide.CompletionEngine.csproj" />
     </ItemGroup>
 </Project>

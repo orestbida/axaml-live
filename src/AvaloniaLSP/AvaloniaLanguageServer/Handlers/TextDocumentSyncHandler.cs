@@ -1,4 +1,5 @@
 using AvaloniaLanguageServer.Models;
+using AvaloniaLanguageServer.Services;
 using MediatR;
 using Microsoft.Extensions.Configuration;
 using OmniSharp.Extensions.LanguageServer.Protocol.Server;
@@ -13,6 +14,7 @@ public class TextDocumentSyncHandler: TextDocumentSyncHandlerBase
     private readonly DocumentSelector _documentSelector;
     private readonly Workspace _workspace;
     private readonly Func<ILanguageServer?> _getServer;
+    private readonly AvaloniaLanguageServer.Services.DiagnosticsService _diagnostics;
 
 
     public override async Task<Unit> Handle(DidOpenTextDocumentParams request, CancellationToken cancellationToken)
@@ -27,6 +29,7 @@ public class TextDocumentSyncHandler: TextDocumentSyncHandlerBase
         string text = request.TextDocument.Text;
         await _workspace.InitializeAsync(uri, _getServer()?.Client.ClientSettings.RootPath);
         _workspace.BufferService.Add(uri, text);
+        _diagnostics.Schedule(uri, 0);
         
         _logger.LogInformation("** DidOpenText: {Uri}", uri);
 
@@ -47,6 +50,7 @@ public class TextDocumentSyncHandler: TextDocumentSyncHandlerBase
                 _workspace.BufferService.ApplyFullChange(uri, change.Text);
             }
         }
+        _diagnostics.Schedule(uri);
 
         return Task.FromResult(Unit.Value);
     }
@@ -65,6 +69,7 @@ public class TextDocumentSyncHandler: TextDocumentSyncHandlerBase
 
         var uri = request.TextDocument.Uri;
         _workspace.BufferService.Remove(uri);
+        _diagnostics.Clear(uri);
         
         _logger.LogInformation("** Did Close Doc: {Uri}", uri);
 
@@ -92,8 +97,10 @@ public class TextDocumentSyncHandler: TextDocumentSyncHandlerBase
         ILanguageServerConfiguration configuration,
         DocumentSelector documentSelector,
         Workspace workspace,
-        Func<ILanguageServer?> getServer)
+        Func<ILanguageServer?> getServer,
+        DiagnosticsService diagnostics)
     {
+        _diagnostics = diagnostics;
         _logger = logger;
         _configuration = configuration;
         _documentSelector = documentSelector;

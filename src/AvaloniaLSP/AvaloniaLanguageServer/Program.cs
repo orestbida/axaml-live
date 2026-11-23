@@ -28,6 +28,10 @@ public class Program
             )
             .WithHandler<CompletionHandler>()
             .WithHandler<TextDocumentSyncHandler>()
+            .WithHandler<HoverHandler>()
+            .WithHandler<DefinitionHandler>()
+            .WithHandler<CodeActionHandler>()
+            .WithHandler<WatchedFilesHandler>()
             .WithServices(ConfigureServices)
             .OnInitialize((init_server, request, token) =>
             {
@@ -43,6 +47,7 @@ public class Program
             new DocumentFilter { Pattern = "**/*.axaml" }
         ));
         services.AddSingleton<Workspace>();
+        services.AddSingleton<AvaloniaLanguageServer.Services.DiagnosticsService>();
         services.AddSingleton(GetServer);
     }
 
@@ -52,7 +57,7 @@ public class Program
     {
         string logFilePath = Path.Combine(Path.GetTempPath(), "avalonia.log");
         Log.Logger = new LoggerConfiguration()
-            .WriteTo.File(logFilePath)
+            .WriteTo.File(logFilePath, shared: true)
             .Enrich.FromLogContext()
             .MinimumLevel.Verbose()
             .CreateLogger();

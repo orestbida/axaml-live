@@ -23,7 +23,8 @@ export async function createLanguageService(context: vscode.ExtensionContext): P
 		outputChannel: logger,
 		synchronize: {
 			configurationSection: "avalonia",
-			fileEvents: vscode.workspace.createFileSystemWatcher("**/*.axaml"),
+			// C# and project changes keep the server's in-memory compilation current (generated members without a build)
+			fileEvents: [vscode.workspace.createFileSystemWatcher("**/*.axaml"), vscode.workspace.createFileSystemWatcher("**/*.{cs,csproj,props}")],
 		},
 		middleware: {
 			// attribute quote style (avalonia.editor.attributeQuoteStyle) for completions that write `Prop=""`
