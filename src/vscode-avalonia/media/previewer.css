@@ -9,7 +9,11 @@ body { display: flex; flex-direction: column; font-family: var(--vscode-font-fam
 @keyframes pulse { from { opacity: 1; } to { opacity: .3; } }
 .status { flex: 1; min-width: 60px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; opacity: .85; cursor: pointer; }
 button, select { background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); border: none; padding: 3px 8px; cursor: pointer; border-radius: 2px; font: inherit; }
-select { padding: 2px 4px; }
+/* dropdowns use the theme's dropdown colors; options too, otherwise the open list is white with light text */
+select { padding: 2px 4px; background: var(--vscode-dropdown-background); color: var(--vscode-dropdown-foreground); border: 1px solid var(--vscode-dropdown-border, transparent); color-scheme: light dark; }
+select:focus { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
+select option { background: var(--vscode-dropdown-listBackground, var(--vscode-dropdown-background)); color: var(--vscode-dropdown-foreground); }
+select option:checked { background: var(--vscode-list-activeSelectionBackground); color: var(--vscode-list-activeSelectionForeground); }
 button:hover { background: var(--vscode-button-secondaryHoverBackground); }
 button:disabled { opacity: .5; cursor: default; }
 button.off { opacity: .45; text-decoration: line-through; }
