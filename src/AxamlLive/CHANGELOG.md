@@ -2,6 +2,20 @@
 
 All notable changes to AXAML Live are documented in this file.
 
+## [0.1.3] - 24 November 2026
+
+- Select mode in the preview toolbar: hover over a control to highlight it, click to select its element in the editor.
+- Outline, breadcrumbs and Go to Symbol for .axaml files.
+- Resource key completion after {StaticResource and {DynamicResource, with keys from other .axaml files and the Fluent
+  and Simple themes. Hover and go to definition also find keys in other files.
+- Binding path completion for nested properties ({Binding Customer.Address.) and inside templates with x:DataType.
+- Type hints after compiled bindings, for example {Binding Name} : string.
+- Completion of style classes, element names and template parts in selectors and in Classes="...".
+- Quick fix on x:DataType: create a design-time view model when the view model has no parameterless constructor.
+- Language server status in the status bar; click it to restart the server.
+- Snippets for styles, setters, control templates, data templates, grids, resources and transitions.
+- Fixed: the preview could run an old cached copy of its script after an update.
+
 ## [0.1.2] - 24 November 2026
 
 - Run button in the editor title bar of .axaml files: builds and starts the app.
