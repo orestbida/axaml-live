@@ -2,7 +2,7 @@
 
 All notable changes to AXAML Live are documented in this file.
 
-## [0.1.3] - 24 November 2026
+## [0.2.0] - 24 November 2026
 
 - Select mode in the preview toolbar: hover over a control to highlight it, click to select its element in the editor.
 - Outline, breadcrumbs and Go to Symbol for .axaml files.
