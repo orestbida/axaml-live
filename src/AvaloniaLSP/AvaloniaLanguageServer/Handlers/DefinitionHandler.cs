@@ -33,6 +33,7 @@ public sealed class DefinitionHandler : DefinitionHandlerBase {
         }
 
         var ctx = await _workspace.ContextAsync(uri, _getServer()?.Client.ClientSettings.RootPath);
+        cancellationToken.ThrowIfCancellationRequested();
         var compilation = ctx.Compilation;
         var doc = new XamlDocument(text);
         var analyzer = new XamlAnalyzer(doc, ctx.Metadata, compilation);

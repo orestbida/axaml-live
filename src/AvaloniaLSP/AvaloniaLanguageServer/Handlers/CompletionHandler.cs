@@ -29,6 +29,7 @@ public class CompletionHandler : CompletionHandlerBase {
         }
 
         var ctx = await _workspace.ContextAsync(request.TextDocument.Uri, _getServer()?.Client.ClientSettings.RootPath, compile: false);
+        cancellationToken.ThrowIfCancellationRequested();
         var metadata = ctx.Metadata;
         var fullText = _workspace.BufferService.GetText(request.TextDocument.Uri) ?? text;
         var fullDoc = new XamlDocument(fullText);

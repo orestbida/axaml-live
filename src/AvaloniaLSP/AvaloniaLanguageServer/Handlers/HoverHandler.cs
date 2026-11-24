@@ -28,6 +28,7 @@ public sealed class HoverHandler : HoverHandlerBase {
         }
 
         var ctx = await _workspace.ContextAsync(request.TextDocument.Uri, _getServer()?.Client.ClientSettings.RootPath);
+        cancellationToken.ThrowIfCancellationRequested();
         var compilation = ctx.Compilation;
         var analyzer = new XamlAnalyzer(new XamlDocument(text), ctx.Metadata, compilation);
         var symbol = analyzer.SymbolAt(request.Position);

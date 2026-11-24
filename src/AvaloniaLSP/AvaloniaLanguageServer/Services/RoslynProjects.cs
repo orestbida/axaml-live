@@ -28,9 +28,16 @@ public sealed class RoslynProjects : IDisposable {
 
     public int Version => _version;
 
-    public async Task<Project?> GetProjectAsync(string projectPath, CancellationToken ct = default) {
+    public async Task<Project?> GetProjectAsync(string projectPath, CancellationToken ct = default) =>
+        (await SnapshotAsync(projectPath, ct)).Project;
+
+    /// <summary>
+    /// The project and the change version it reflects, read together under the lock: a C# file saved later raises the
+    /// version, so a compilation of this snapshot is never stored as the newer version.
+    /// </summary>
+    async Task<(Project? Project, int Version)> SnapshotAsync(string projectPath, CancellationToken ct) {
         if (!projectPath.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase)) {
-            return null; // Roslyn C# only (F# projects use the built assembly)
+            return (null, _version); // Roslyn C# only (F# projects use the built assembly)
         }
 
         await _lock.WaitAsync(ct);
@@ -58,10 +65,10 @@ public sealed class RoslynProjects : IDisposable {
                 id = project.Id;
                 Log.Logger.Information("Roslyn: loaded {Project} in {Ms} ms", projectPath, sw.ElapsedMilliseconds);
             }
-            return _solution?.GetProject(id);
-        } catch (Exception e) {
+            return (_solution?.GetProject(id), _version);
+        } catch (Exception e) when (e is not OperationCanceledException) {
             Log.Logger.Warning(e, "Roslyn: failed to load {Project}", projectPath);
-            return null;
+            return (null, _version);
         } finally {
             _lock.Release();
         }
@@ -69,21 +76,24 @@ public sealed class RoslynProjects : IDisposable {
 
     /// <summary>Compilation (with source generators) of a project, cached per change version.</summary>
     public async Task<Compilation?> GetCompilationAsync(string projectPath, CancellationToken ct = default) {
-        var project = await GetProjectAsync(projectPath, ct);
+        var (project, version) = await SnapshotAsync(projectPath, ct);
         if (project == null) {
             return null;
         }
 
-        if (_compilations.TryGetValue(project.Id, out var cached) && cached.Version == _version) {
+        if (_compilations.TryGetValue(project.Id, out var cached) && cached.Version >= version) {
             return cached.Compilation;
         }
 
         var compilation = await project.GetCompilationAsync(ct);
-        var generated = (await project.GetSourceGeneratedDocumentsAsync(ct)).Count();
-        Log.Logger.Debug("Roslyn: compiled {Project} v{Version}: {Trees} trees, {Generated} generated, {Analyzers} analyzer references",
-            project.Name, _version, compilation?.SyntaxTrees.Count(), generated, project.AnalyzerReferences.Count);
+        if (Log.Logger.IsEnabled(Serilog.Events.LogEventLevel.Debug)) {
+            var generated = (await project.GetSourceGeneratedDocumentsAsync(ct)).Count();
+            Log.Logger.Debug("Roslyn: compiled {Project} v{Version}: {Trees} trees, {Generated} generated, {Analyzers} analyzer references",
+                project.Name, version, compilation?.SyntaxTrees.Count(), generated, project.AnalyzerReferences.Count);
+        }
         if (compilation != null) {
-            _compilations[project.Id] = (_version, compilation);
+            // a slower compilation of an older snapshot must not replace a newer one
+            _compilations.AddOrUpdate(project.Id, (version, compilation), (_, old) => old.Version > version ? old : (version, compilation));
         }
 
         return compilation;
