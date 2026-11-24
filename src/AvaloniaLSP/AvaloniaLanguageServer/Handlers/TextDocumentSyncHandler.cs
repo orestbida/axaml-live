@@ -10,7 +10,7 @@ namespace AvaloniaLanguageServer.Handlers;
 public class TextDocumentSyncHandler : TextDocumentSyncHandlerBase {
     private readonly ILogger<TextDocumentSyncHandler> _logger;
     private readonly ILanguageServerConfiguration _configuration;
-    private readonly DocumentSelector _documentSelector;
+    private readonly TextDocumentSelector _documentSelector;
     private readonly Workspace _workspace;
     private readonly Func<ILanguageServer?> _getServer;
     private readonly AvaloniaLanguageServer.Services.DiagnosticsService _diagnostics;
@@ -68,7 +68,7 @@ public class TextDocumentSyncHandler : TextDocumentSyncHandlerBase {
         return Task.FromResult(Unit.Value);
     }
 
-    protected override TextDocumentSyncRegistrationOptions CreateRegistrationOptions(SynchronizationCapability capability,
+    protected override TextDocumentSyncRegistrationOptions CreateRegistrationOptions(TextSynchronizationCapability capability,
         ClientCapabilities clientCapabilities) {
         return new TextDocumentSyncRegistrationOptions {
             DocumentSelector = _documentSelector,
@@ -84,7 +84,7 @@ public class TextDocumentSyncHandler : TextDocumentSyncHandlerBase {
     public TextDocumentSyncHandler(
         ILogger<TextDocumentSyncHandler> logger,
         ILanguageServerConfiguration configuration,
-        DocumentSelector documentSelector,
+        TextDocumentSelector documentSelector,
         Workspace workspace,
         Func<ILanguageServer?> getServer,
         DiagnosticsService diagnostics) {

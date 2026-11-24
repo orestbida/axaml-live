@@ -7,9 +7,9 @@ namespace AvaloniaLanguageServer.Handlers;
 /// <summary>Quick fixes for unknown types, properties and binding paths: "Change to 'X'" using the suggestions of the diagnostic.</summary>
 public sealed class CodeActionHandler : CodeActionHandlerBase {
     readonly Workspace _workspace;
-    readonly DocumentSelector _documentSelector;
+    readonly TextDocumentSelector _documentSelector;
 
-    public CodeActionHandler(Workspace workspace, DocumentSelector documentSelector) {
+    public CodeActionHandler(Workspace workspace, TextDocumentSelector documentSelector) {
         _workspace = workspace;
         _documentSelector = documentSelector;
     }

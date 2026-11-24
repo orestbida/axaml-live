@@ -9,10 +9,10 @@ namespace AvaloniaLanguageServer.Handlers;
 /// <summary>Hover for element types, properties/events, binding path members, x:Class/x:DataType and resources.</summary>
 public sealed class HoverHandler : HoverHandlerBase {
     readonly Workspace _workspace;
-    readonly DocumentSelector _documentSelector;
+    readonly TextDocumentSelector _documentSelector;
     readonly Func<ILanguageServer?> _getServer;
 
-    public HoverHandler(Workspace workspace, DocumentSelector documentSelector, Func<ILanguageServer?> getServer) {
+    public HoverHandler(Workspace workspace, TextDocumentSelector documentSelector, Func<ILanguageServer?> getServer) {
         _workspace = workspace;
         _documentSelector = documentSelector;
         _getServer = getServer;

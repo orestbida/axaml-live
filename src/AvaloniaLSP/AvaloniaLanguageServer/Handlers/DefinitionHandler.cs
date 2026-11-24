@@ -13,10 +13,10 @@ namespace AvaloniaLanguageServer.Handlers;
 /// </summary>
 public sealed class DefinitionHandler : DefinitionHandlerBase {
     readonly Workspace _workspace;
-    readonly DocumentSelector _documentSelector;
+    readonly TextDocumentSelector _documentSelector;
     readonly Func<ILanguageServer?> _getServer;
 
-    public DefinitionHandler(Workspace workspace, DocumentSelector documentSelector, Func<ILanguageServer?> getServer) {
+    public DefinitionHandler(Workspace workspace, TextDocumentSelector documentSelector, Func<ILanguageServer?> getServer) {
         _workspace = workspace;
         _documentSelector = documentSelector;
         _getServer = getServer;
