@@ -61,6 +61,113 @@
     $("rotate").onclick = () => send({ type: "setFormFactor", id: options.formFactor, rotated: !options.rotated });
     $("input").onclick = () => send({ type: "setInput", enabled: !options.inputEnabled });
 
+    // Toolbar menus drawn by the page instead of native <select> popups: in a webview without focus a native popup
+    // opens and closes again on the first click. The hidden <select> keeps the value and its change handler.
+    const dropdowns = [];
+    let openMenu = null;
+    function closeMenu() {
+        if (openMenu) {
+            openMenu.menu.remove();
+            openMenu.button.setAttribute("aria-expanded", "false");
+            openMenu = null;
+        }
+    }
+    function dropdown(select) {
+        const button = document.createElement("button");
+        button.className = "dropdown-button";
+        button.title = select.title;
+        button.setAttribute("aria-haspopup", "listbox");
+        button.setAttribute("aria-expanded", "false");
+        select.parentElement.insertBefore(button, select);
+        const refresh = () => {
+            const o = select.options[select.selectedIndex];
+            button.textContent = o ? o.textContent : "";
+        };
+        const choose = (value) => {
+            closeMenu();
+            if (select.value !== value) {
+                select.value = value;
+                refresh();
+                select.dispatchEvent(new Event("change"));
+            }
+            button.focus();
+        };
+        const open = () => {
+            const menu = document.createElement("div");
+            menu.className = "dropdown-menu";
+            menu.setAttribute("role", "listbox");
+            for (const o of select.options) {
+                if (!o.textContent) {
+                    continue;
+                }
+                const item = document.createElement("div");
+                item.className = "dropdown-item" + (o.selected ? " selected" : "");
+                item.setAttribute("role", "option");
+                item.textContent = o.textContent;
+                item.title = o.title;
+                item.dataset.value = o.value;
+                item.onpointerdown = (e) => e.preventDefault();
+                item.onclick = () => choose(o.value);
+                menu.appendChild(item);
+            }
+            document.body.appendChild(menu);
+            const r = button.getBoundingClientRect();
+            const left = Math.max(4, Math.min(r.left, window.innerWidth - menu.offsetWidth - 4));
+            menu.style.left = left + "px";
+            menu.style.top = r.bottom + 2 + "px";
+            menu.style.minWidth = r.width + "px";
+            menu.style.maxHeight = Math.max(80, window.innerHeight - r.bottom - 10) + "px";
+            button.setAttribute("aria-expanded", "true");
+            openMenu = { button, menu, select };
+            (menu.querySelector(".selected") || menu.firstChild)?.classList.add("active");
+            menu.querySelector(".active")?.scrollIntoView({ block: "nearest" });
+        };
+        button.onclick = () => {
+            const wasOpen = openMenu && openMenu.button === button;
+            closeMenu();
+            if (!wasOpen) {
+                open();
+            }
+        };
+        button.onkeydown = (e) => {
+            const menu = openMenu && openMenu.button === button ? openMenu.menu : null;
+            if (!menu) {
+                if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+                    e.preventDefault();
+                    open();
+                }
+                return;
+            }
+            const items = [...menu.children];
+            const i = items.findIndex((x) => x.classList.contains("active"));
+            if (e.key === "Escape") {
+                e.preventDefault();
+                closeMenu();
+            } else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+                e.preventDefault();
+                const next = items[Math.max(0, Math.min(items.length - 1, i + (e.key === "ArrowDown" ? 1 : -1)))];
+                items.forEach((x) => x.classList.toggle("active", x === next));
+                next.scrollIntoView({ block: "nearest" });
+            } else if ((e.key === "Enter" || e.key === " ") && i >= 0) {
+                e.preventDefault();
+                choose(items[i].dataset.value);
+            }
+        };
+        dropdowns.push(refresh);
+        refresh();
+    }
+    const refreshDropdowns = () => dropdowns.forEach((r) => r());
+    for (const id of ["zoom", "theme", "formFactor"]) {
+        dropdown($(id));
+    }
+    document.addEventListener("pointerdown", (e) => {
+        if (openMenu && !openMenu.menu.contains(e.target) && e.target !== openMenu.button) {
+            closeMenu();
+        }
+    });
+    window.addEventListener("blur", closeMenu);
+    window.addEventListener("resize", closeMenu);
+
     function step(dir) {
         const next = dir > 0 ? zoomLevels.find((l) => l > zoom + 0.001) : [...zoomLevels].reverse().find((l) => l < zoom - 0.001);
         setZoom(next ?? (dir > 0 ? zoomLevels[zoomLevels.length - 1] : zoomLevels[0]));
@@ -112,6 +219,7 @@
             $("zoomCustom").textContent = Math.round(zoom * 100) + "%";
             zoomSelect.value = "custom";
         }
+        refreshDropdowns();
         reportView(stageW, stageH);
     }
 
@@ -283,6 +391,7 @@
                 options = msg.options;
                 $("theme").value = options.theme;
                 $("formFactor").value = options.formFactor;
+                refreshDropdowns();
                 $("rotate").disabled = options.formFactor === "default";
                 $("input").classList.toggle("checked", options.inputEnabled);
                 $("input").setAttribute("aria-pressed", String(options.inputEnabled));

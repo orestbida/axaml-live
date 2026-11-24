@@ -136,7 +136,11 @@ button.action.checked {
     color: var(--vscode-dropdown-foreground, var(--vscode-foreground));
     opacity: 0.8;
 }
-select {
+/* the native <select> only keeps the value; .dropdown-button and .dropdown-menu are what is shown */
+.select select {
+    display: none;
+}
+.dropdown-button {
     appearance: none;
     -webkit-appearance: none;
     height: 24px;
@@ -156,20 +160,43 @@ select {
         background-color 0.1s,
         border-color 0.1s;
 }
-select:hover {
+.dropdown-button:hover {
     background: var(--ctl-bg-hover);
     border-color: var(--ctl-border-hover);
 }
-select:focus {
+.dropdown-button:focus {
     outline: none;
     border-color: var(--vscode-focusBorder);
 }
-/* the open list: theme colors, otherwise it is white with light text */
-select option {
-    background: var(--vscode-dropdown-listBackground, var(--vscode-dropdown-background));
-    color: var(--vscode-dropdown-foreground);
+.dropdown-button {
+    text-align: left;
+    white-space: nowrap;
 }
-select option:checked {
+.dropdown-menu {
+    position: fixed;
+    z-index: 100;
+    box-sizing: border-box;
+    overflow-y: auto;
+    padding: 4px;
+    font-size: 12px;
+    background: var(--vscode-dropdown-listBackground, var(--vscode-dropdown-background));
+    color: var(--vscode-dropdown-foreground, var(--vscode-foreground));
+    border: 1px solid var(--vscode-dropdown-border, var(--ctl-border));
+    border-radius: 6px;
+    box-shadow: 0 2px 8px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.36));
+}
+.dropdown-item {
+    padding: 3px 8px;
+    border-radius: 4px;
+    line-height: 18px;
+    white-space: nowrap;
+    cursor: pointer;
+}
+.dropdown-item:hover,
+.dropdown-item.active {
+    background: var(--vscode-list-hoverBackground);
+}
+.dropdown-item.selected {
     background: var(--vscode-list-activeSelectionBackground);
     color: var(--vscode-list-activeSelectionForeground);
 }
