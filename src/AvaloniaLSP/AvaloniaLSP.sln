@@ -8,6 +8,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Avalonia.Ide.CompletionEngi
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SolutionParser", "..\SolutionParser\SolutionParser.csproj", "{B063A56A-8028-4F9D-A48B-3A7E0E5250E1}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AvaloniaLanguageServer.Tests", "AvaloniaLanguageServer.Tests\AvaloniaLanguageServer.Tests.csproj", "{DE5842C4-FCFB-4B42-85AB-5E5D4A04A42A}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -66,6 +68,18 @@ Global
 		{B063A56A-8028-4F9D-A48B-3A7E0E5250E1}.Release|x64.Build.0 = Release|Any CPU
 		{B063A56A-8028-4F9D-A48B-3A7E0E5250E1}.Release|x86.ActiveCfg = Release|Any CPU
 		{B063A56A-8028-4F9D-A48B-3A7E0E5250E1}.Release|x86.Build.0 = Release|Any CPU
+		{DE5842C4-FCFB-4B42-85AB-5E5D4A04A42A}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{DE5842C4-FCFB-4B42-85AB-5E5D4A04A42A}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{DE5842C4-FCFB-4B42-85AB-5E5D4A04A42A}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{DE5842C4-FCFB-4B42-85AB-5E5D4A04A42A}.Debug|x64.Build.0 = Debug|Any CPU
+		{DE5842C4-FCFB-4B42-85AB-5E5D4A04A42A}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{DE5842C4-FCFB-4B42-85AB-5E5D4A04A42A}.Debug|x86.Build.0 = Debug|Any CPU
+		{DE5842C4-FCFB-4B42-85AB-5E5D4A04A42A}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{DE5842C4-FCFB-4B42-85AB-5E5D4A04A42A}.Release|Any CPU.Build.0 = Release|Any CPU
+		{DE5842C4-FCFB-4B42-85AB-5E5D4A04A42A}.Release|x64.ActiveCfg = Release|Any CPU
+		{DE5842C4-FCFB-4B42-85AB-5E5D4A04A42A}.Release|x64.Build.0 = Release|Any CPU
+		{DE5842C4-FCFB-4B42-85AB-5E5D4A04A42A}.Release|x86.ActiveCfg = Release|Any CPU
+		{DE5842C4-FCFB-4B42-85AB-5E5D4A04A42A}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

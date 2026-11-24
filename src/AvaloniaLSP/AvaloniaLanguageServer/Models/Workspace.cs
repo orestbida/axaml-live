@@ -6,6 +6,7 @@ using Avalonia.Ide.CompletionEngine.DnlibMetadataProvider;
 using AvaloniaLanguageServer.Services;
 using AvaloniaLanguageServer.Utilities;
 using Compilation = Microsoft.CodeAnalysis.Compilation;
+using VersionStamp = Microsoft.CodeAnalysis.VersionStamp;
 
 namespace AvaloniaLanguageServer.Models;
 
@@ -27,12 +28,16 @@ public class Workspace {
     public ProjectInfo? LastProject { get; private set; }
 
     sealed record Built(DateTime Stamp, Metadata Metadata);
-    sealed record Live(int Version, DateTime Time, Metadata Metadata);
+    sealed record Live(DateTime Time, Metadata Metadata);
 
     readonly ConcurrentDictionary<string, ProjectInfo> _projects = new(StringComparer.OrdinalIgnoreCase);
     readonly ConcurrentDictionary<string, Built> _built = new(StringComparer.OrdinalIgnoreCase);
     readonly ConcurrentDictionary<string, Live> _live = new(StringComparer.OrdinalIgnoreCase);
-    readonly ConcurrentDictionary<string, int> _liveAttempted = new(StringComparer.OrdinalIgnoreCase);
+    /// <summary>
+    /// The project version (Roslyn's, changes with the project's or a referenced project's sources) live metadata was
+    /// last computed for, also when the code did not compile: each version is compiled once.
+    /// </summary>
+    readonly ConcurrentDictionary<string, VersionStamp> _liveAttempted = new(StringComparer.OrdinalIgnoreCase);
     readonly SemaphoreSlim _liveLock = new(1, 1);
     readonly object _dataLock = new();
     readonly object _builtLock = new();
@@ -59,7 +64,11 @@ public class Workspace {
 
         LastProject = project;
         var built = BuiltMetadata(project, rootPath);
-        if (!_liveAttempted.TryGetValue(project.ProjectPath, out var attempted) || attempted != Roslyn.Version) {
+        // cheap check on the loaded snapshot; loading and compiling happen in the background
+        var loaded = Roslyn.LoadedProject(project.ProjectPath);
+        if (loaded == null
+            || !_liveAttempted.TryGetValue(project.ProjectPath, out var attempted)
+            || attempted != await loaded.GetDependentVersionAsync()) {
             RefreshLiveAsync(project.ProjectPath).FireAndForget();
         }
 
@@ -99,21 +108,26 @@ public class Workspace {
         bool changed = false;
         await _liveLock.WaitAsync();
         try {
-            var version = Roslyn.Version;
+            // one snapshot: its version and its compilation belong together
+            var snapshot = await Roslyn.GetProjectAsync(project);
+            if (snapshot == null) {
+                return;
+            }
+            var version = await snapshot.GetDependentVersionAsync();
             if (_liveAttempted.TryGetValue(project, out var attempted) && attempted == version) {
                 return;
             }
 
             _liveAttempted[project] = version;
-            var paths = await Roslyn.EmitForMetadataAsync(project);
+            var paths = await Roslyn.EmitForMetadataAsync(snapshot);
             if (paths == null) {
                 return;
             }
 
             var metadata = MetadataConverter.ConvertMetadata(new DnlibMetadataProvider().GetMetadata(paths));
-            _live[project] = new Live(version, DateTime.UtcNow, metadata);
+            _live[project] = new Live(DateTime.UtcNow, metadata);
             changed = true;
-            Log.Logger.Information("Live completion metadata for {Project} (version {Version})", project, version);
+            Log.Logger.Information("Live completion metadata for {Project} ({Version})", project, version);
         } catch (Exception e) {
             Log.Logger.Warning(e, "Live metadata failed for {Project}", project);
         } finally {

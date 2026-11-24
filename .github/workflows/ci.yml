@@ -62,6 +62,10 @@ jobs:
           dotnet build SolutionParser/SolutionParser.csproj -c Release --output AxamlLive/solutionParserTool
           dotnet build DesignerHook/AxamlLive.DesignerHook.csproj -c Release --output AxamlLive/designerHook
 
+      - name: Language server tests
+        working-directory: src/AvaloniaLSP
+        run: dotnet test AvaloniaLanguageServer.Tests/AvaloniaLanguageServer.Tests.csproj
+
       - name: Package VSIX
         if: matrix.os == 'ubuntu-latest'
         working-directory: src/AxamlLive
