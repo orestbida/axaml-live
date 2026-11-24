@@ -21,8 +21,8 @@ import {
     designDataHint,
     themeWrapperDepth,
 } from "../xaml/designTransforms";
-import { formFactors, resolveFormFactor } from "../xaml/formFactors";
-import { findElementByPath } from "../xaml/inspect";
+import { Size, clampCustomSize, formFactors, resolveFormFactor } from "../xaml/formFactors";
+import { ViewSource, findElementAcrossViews } from "../xaml/inspect";
 import { onLines } from "../util/lines";
 import { PreviewRequest, RequestLoop, mergePreviewRequests } from "./requestLoop";
 
@@ -88,6 +88,10 @@ export class PreviewController implements vscode.Disposable {
     private _theme: string;
     private _formFactor: string;
     private _rotated: boolean;
+    /** The size used by the "custom" form factor (typed or dragged in the preview); remembered across sessions. */
+    private _customSize: Size | undefined;
+    /** Rulers along the preview's top and left edges; remembered across sessions. */
+    private _rulers: boolean;
     private _inputEnabled: boolean;
     private _view: ViewInfo | undefined;
     private _frames = 0;
@@ -100,12 +104,24 @@ export class PreviewController implements vscode.Disposable {
         const config = this.config;
         this._theme = config.get<string>("defaultThemeVariant", "Default");
         this._formFactor = config.get<string>("defaultFormFactor", "default");
+        if (!formFactors.some((f) => f.id === this._formFactor)) {
+            this._formFactor = "default"; // a size that is no longer offered (laptop, phoneSmall, ...)
+        }
         this._rotated = config.get<boolean>("defaultFormFactorRotated", false);
+        this._customSize = _context.globalState.get<Size>(customSizeKey);
+        this._rulers = _context.globalState.get<boolean>(rulersKey, false);
+        if (this._formFactor === "custom" && !this._customSize) {
+            this._formFactor = "default"; // no custom size yet
+        }
         this._inputEnabled = config.get<boolean>("enableInput", true);
         this._disposables.push(
             this._diagnostics,
             vscode.window.onDidChangeActiveTextEditor((e) => {
                 if (e && isAvaloniaFile(e.document)) {
+                    // select mode opened a nested view's file: the preview stays on the view being inspected
+                    if (this._revealing && samePath(e.document.uri.fsPath, this._revealing)) {
+                        return;
+                    }
                     if (this._panel) {
                         this.setFile(e.document.uri);
                     } else if (this.config.get<boolean>("autoOpen", false)) {
@@ -181,6 +197,9 @@ export class PreviewController implements vscode.Disposable {
             rotated: this._rotated,
             inputEnabled: this._inputEnabled,
             maxRenderScale: Math.max(1, this.config.get<number>("maxRenderScale", 3)),
+            customWidth: this._customSize?.width,
+            customHeight: this._customSize?.height,
+            rulers: this._rulers,
         };
     }
 
@@ -232,7 +251,26 @@ export class PreviewController implements vscode.Disposable {
             case "setFormFactor":
                 this._formFactor = formFactors.some((f) => f.id === msg.id) ? msg.id : "default";
                 this._rotated = !!msg.rotated;
+                // choosing Custom without a size yet: start from the size shown now
+                if (this._formFactor === "custom" && !this._customSize) {
+                    this.setCustomSize(msg.width, msg.height);
+                }
+                if (this._formFactor === "custom" && !this._customSize) {
+                    this._formFactor = "default";
+                }
                 this.optionsChanged();
+                break;
+            case "setCustomSize":
+                // typed in the toolbar or dragged with the frame's handles
+                if (this.setCustomSize(msg.width, msg.height)) {
+                    this._formFactor = "custom";
+                    this.optionsChanged();
+                }
+                break;
+            case "setRulers":
+                this._rulers = !!msg.on;
+                void this._context.globalState.update(rulersKey, this._rulers);
+                this._panel?.setOptions(this.panelOptions);
                 break;
             case "setInput":
                 this._inputEnabled = !!msg.enabled;
@@ -240,6 +278,10 @@ export class PreviewController implements vscode.Disposable {
                 break;
             case "input":
                 this.forwardInput(msg);
+                break;
+            case "testDrag":
+                // end-to-end tests only (axamlLive.debug.previewCommand): the webview drags a resize handle
+                this._panel?.testDrag(String(msg.edge), Number(msg.dx) || 0, Number(msg.dy) || 0);
                 break;
         }
     }
@@ -291,6 +333,16 @@ export class PreviewController implements vscode.Disposable {
                 });
             }
         }, 1500);
+    }
+
+    private setCustomSize(width: unknown, height: unknown): boolean {
+        const size = clampCustomSize(width, height);
+        if (!size) {
+            return false;
+        }
+        this._customSize = size;
+        void this._context.globalState.update(customSizeKey, size);
+        return true;
     }
 
     /** Toolbar changes in quick succession result in one XAML update (each update opens a new design window). */
@@ -674,7 +726,7 @@ export class PreviewController implements vscode.Disposable {
         const withBackground = applyPreviewBackground(withDataContext, this.config.get<string>("background", "theme"));
         this._wrapperDepth = themeWrapperDepth(withBackground, this._theme);
         text = applyThemeVariant(withBackground, this._theme);
-        const size = resolveFormFactor(this._formFactor, this._rotated);
+        const size = resolveFormFactor(this._formFactor, this._rotated, this._customSize);
         if (size) {
             text = applyDesignSize(text, size.width, size.height);
         }
@@ -723,9 +775,11 @@ export class PreviewController implements vscode.Disposable {
             this._diagnostics.delete(file);
             const hint = this._designDataContextFailed.get(file.fsPath);
             if (hint && this._session) {
+                // short in the toolbar; the reason (often a long designer message) is in its tooltip
                 this._panel?.setState({
                     status: "ready",
-                    message: `${this._session.project.name} · ${path.basename(file.fsPath)} · ${hint}`,
+                    message: `${this._session.project.name} · ${path.basename(file.fsPath)} · no design data`,
+                    details: hint,
                 });
             }
             this.checkRendered(file, this._framesAtPush);
@@ -922,7 +976,8 @@ export class PreviewController implements vscode.Disposable {
             return;
         }
         const { file, text } = this._inspected;
-        const found = findElementByPath(text, msg.path, this._wrapperDepth);
+        // views inside the previewed one (<v:Card />, data templates) continue in their own .axaml
+        const found = findElementAcrossViews({ file: file.fsPath, text }, msg.path, this._wrapperDepth, (t) => this.viewSource(t));
         if (!found) {
             this._panel?.setHighlight(undefined);
             return;
@@ -930,7 +985,8 @@ export class PreviewController implements vscode.Disposable {
         const el = found.element;
         const step = msg.path[found.pathIndex];
         const name = el.attributes.find((a) => a.name === "x:Name" || a.name === "Name")?.value;
-        const label = name ? `${el.name} ${name}` : el.name;
+        const nested = !samePath(found.file, file.fsPath);
+        const label = (name ? `${el.name} ${name}` : el.name) + (nested ? ` · ${path.basename(found.file)}` : "");
         this._lastHighlight = label;
         if (step.width !== undefined && step.height !== undefined) {
             this._panel?.setHighlight({
@@ -945,21 +1001,71 @@ export class PreviewController implements vscode.Disposable {
         if (msg.kind !== "select") {
             return;
         }
-        const doc = await vscode.workspace.openTextDocument(file);
-        if (doc.getText() !== text) {
+        const target = vscode.Uri.file(found.file);
+        const doc = await vscode.workspace.openTextDocument(target);
+        if (doc.getText() !== found.text) {
             return; // edited since this preview: the offsets no longer fit
         }
-        const visible = vscode.window.visibleTextEditors.find((e) => samePath(e.document.uri.fsPath, file.fsPath));
+        // a nested view's file opens where the previewed file is shown
+        const visible =
+            vscode.window.visibleTextEditors.find((e) => samePath(e.document.uri.fsPath, found.file)) ??
+            vscode.window.visibleTextEditors.find((e) => samePath(e.document.uri.fsPath, file.fsPath));
         const selection = new vscode.Selection(doc.positionAt(el.start + 1), doc.positionAt(el.nameEnd));
-        const editor = await vscode.window.showTextDocument(doc, {
-            viewColumn: visible?.viewColumn ?? vscode.ViewColumn.One,
-            selection,
-            preserveFocus: true,
-        });
-        editor.revealRange(
-            new vscode.Range(doc.positionAt(el.start), doc.positionAt(el.startTagEnd)),
-            vscode.TextEditorRevealType.InCenterIfOutsideViewport
-        );
+        this._revealing = nested ? found.file : undefined;
+        try {
+            const editor = await vscode.window.showTextDocument(doc, {
+                viewColumn: visible?.viewColumn ?? vscode.ViewColumn.One,
+                selection,
+                preserveFocus: true,
+            });
+            editor.revealRange(
+                new vscode.Range(doc.positionAt(el.start), doc.positionAt(el.startTagEnd)),
+                vscode.TextEditorRevealType.InCenterIfOutsideViewport
+            );
+        } finally {
+            // the editor change event of this reveal has arrived by now; later switches to the file preview it
+            setTimeout(() => (this._revealing = undefined), 500);
+        }
+    }
+
+    /** Select mode: the file being revealed in the editor, whose editor change must not switch the preview. */
+    private _revealing: string | undefined;
+    /** x:Class to .axaml file, for views inside the previewed one; rebuilt when the solution model changes. */
+    private _views: { model: sm.Solution; byClass: Map<string, string>; built: number } | undefined;
+
+    private viewSource(fullType: string): ViewSource | undefined {
+        const model = sln.getSolutionModel();
+        if (!model) {
+            return undefined;
+        }
+        let file = this._views?.model === model ? this._views.byClass.get(fullType) : undefined;
+        // a class added since (a new view, an x:Class typed later): look again, at most every few seconds
+        if (!file && (this._views?.model !== model || Date.now() - this._views.built > 3000)) {
+            const byClass = new Map<string, string>();
+            for (const f of model.files) {
+                const cls = /\bx:Class\s*=\s*["']([^"']+)["']/.exec(this.textOf(f.path) ?? "")?.[1];
+                if (cls) {
+                    byClass.set(cls, f.path);
+                }
+            }
+            this._views = { model, byClass, built: Date.now() };
+            file = byClass.get(fullType);
+        }
+        const text = file ? this.textOf(file) : undefined;
+        return file && text !== undefined ? { file, text } : undefined;
+    }
+
+    /** The editor's text of an open file (offsets for the selection must fit it), else the file on disk. */
+    private textOf(file: string): string | undefined {
+        const doc = vscode.workspace.textDocuments.find((d) => samePath(d.uri.fsPath, file));
+        if (doc) {
+            return doc.getText();
+        }
+        try {
+            return fs.readFileSync(file, "utf8");
+        } catch {
+            return undefined;
+        }
     }
 
     public getDebugState() {
@@ -997,6 +1103,8 @@ export class PreviewController implements vscode.Disposable {
                 theme: this._theme,
                 formFactor: this._formFactor,
                 rotated: this._rotated,
+                customSize: this._customSize,
+                rulers: this._rulers,
                 inputEnabled: this._inputEnabled,
                 inputsForwarded: this._inputsForwarded,
                 fpsLimit: this.fpsLimit,
@@ -1017,6 +1125,9 @@ export class PreviewController implements vscode.Disposable {
         this._disposables.forEach((d) => d.dispose());
     }
 }
+
+const customSizeKey = "axamlLive.previewer.customSize";
+const rulersKey = "axamlLive.previewer.rulers";
 
 /** Frames per second while the preview tab is hidden. */
 const hiddenFrameRate = 2;

@@ -260,15 +260,12 @@
             "enum": [
               "default",
               "desktop",
-              "laptop",
               "phone",
-              "phoneSmall",
-              "phoneLarge",
               "tablet",
-              "tabletLarge"
+              "custom"
             ],
             "default": "default",
-            "description": "Form factor (device size) the previewer starts with. default uses the design size of the XAML (d:DesignWidth/Height)."
+            "description": "Form factor (device size) the previewer starts with. default uses the design size of the XAML (d:DesignWidth/Height); custom uses the last custom size (typed or dragged in the preview)."
           },
           "axamlLive.previewer.defaultFormFactorRotated": {
             "type": "boolean",

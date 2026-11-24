@@ -2,7 +2,7 @@ import * as vscode from "vscode";
 import path = require("path");
 import { AppConstants } from "../util/Utilities";
 import { getNonce } from "../util/nonce";
-import { formFactors } from "../xaml/formFactors";
+import { formFactorLabel, formFactors } from "../xaml/formFactors";
 import * as zlib from "zlib";
 import { promisify } from "util";
 import * as fs from "fs";
@@ -28,6 +28,10 @@ export interface PanelOptions {
     rotated: boolean;
     inputEnabled: boolean;
     maxRenderScale: number;
+    /** The custom size (form factor "custom"), also shown in the toolbar's size fields. */
+    customWidth?: number;
+    customHeight?: number;
+    rulers: boolean;
 }
 
 export interface FrameMessage {
@@ -245,6 +249,11 @@ export class WebPreviewerPanel implements vscode.Disposable {
         this._panel.webview.postMessage({ type: "setZoom", zoom });
     }
 
+    /** End-to-end tests: drags a resize handle of the frame with pointer events in the webview. */
+    public testDrag(edge: string, dx: number, dy: number) {
+        this._panel.webview.postMessage({ type: "testDrag", edge, dx, dy });
+    }
+
     /** Select mode: box around the control under the pointer (logical coordinates of the previewed view). */
     public setHighlight(rect: { x: number; y: number; width: number; height: number; label: string; selected: boolean } | undefined) {
         this._panel.webview.postMessage({ type: "highlight", rect });
@@ -297,7 +306,7 @@ export class WebPreviewerPanel implements vscode.Disposable {
             defaultZoom: config.get<number | string>("defaultZoom", 1),
             formFactors: formFactors.map((f) => ({
                 id: f.id,
-                label: f.label,
+                label: formFactorLabel(f),
                 size: f.width ? `${f.width}×${f.height}` : "d:DesignWidth/Height",
             })),
         };
@@ -322,10 +331,15 @@ export class WebPreviewerPanel implements vscode.Disposable {
         <span class="sep"></span>
         <div class="group">
             <span class="select"><select id="theme" title="Theme variant"><option value="Default">App theme</option><option value="Light">Light</option><option value="Dark">Dark</option></select></span>
-            <span class="select"><select id="formFactor" title="Form factor"></select></span>
-            <button id="rotate" class="action codicon codicon-arrow-swap" title="Rotate"></button>
-            <button id="input" class="action codicon codicon-inspect" title="Mouse and keyboard input to the preview" aria-pressed="true"></button>
-            <button id="selectElement" class="action codicon codicon-target" title="Select an element: click it to go to its XAML (Esc to stop)" aria-pressed="false"></button>
+            <span class="select"><select id="formFactor" title="Size: the view's design size, a device, or a custom size"></select></span>
+            <span id="customSize" class="custom-size" hidden>
+                <input id="customWidth" type="number" min="16" max="8000" step="1" title="Width (logical pixels)" aria-label="Width" />
+                <span class="times">×</span>
+                <input id="customHeight" type="number" min="16" max="8000" step="1" title="Height (logical pixels)" aria-label="Height" />
+            </span>
+            <button id="input" class="action codicon codicon-keyboard" title="Mouse and keyboard input to the preview" aria-pressed="true"></button>
+            <button id="rulers" class="action codicon codicon-symbol-ruler" title="Rulers" aria-pressed="false"></button>
+            <button id="selectElement" class="action codicon codicon-inspect" title="Select an element: click it to go to its XAML (Esc to stop)" aria-pressed="false"></button>
         </div>
         <span class="sep"></span>
         <div class="group">
@@ -334,9 +348,21 @@ export class WebPreviewerPanel implements vscode.Disposable {
             <button id="log" class="action codicon codicon-output" title="Show the Avalonia output log"></button>
         </div>
     </div>
-    <div id="stage" class="stage">
-        <div id="frameBox" class="frame-box"><canvas id="canvas" tabindex="0"></canvas><div id="highlight" class="highlight"><span id="highlightLabel"></span></div></div>
-        <div id="overlay" class="overlay"><div id="overlayText"></div><pre id="overlayDetails" style="display:none"></pre><button id="overlayBuild" style="display:none">Build project</button></div>
+    <div id="stageArea" class="stage-area">
+        <canvas id="rulerTop" class="ruler ruler-top"></canvas>
+        <canvas id="rulerLeft" class="ruler ruler-left"></canvas>
+        <div class="ruler-corner"></div>
+        <div id="stage" class="stage">
+            <div id="frameBox" class="frame-box">
+                <canvas id="canvas" tabindex="0"></canvas>
+                <div id="highlight" class="highlight"><span id="highlightLabel"></span></div>
+                <div id="resizeOutline" class="resize-outline"><span id="resizeLabel"></span></div>
+                <div class="resize-handle handle-e" data-edge="e" title="Drag to change the width"></div>
+                <div class="resize-handle handle-s" data-edge="s" title="Drag to change the height"></div>
+                <div class="resize-handle handle-se" data-edge="se" title="Drag to change the size"></div>
+            </div>
+            <div id="overlay" class="overlay"><div id="overlayText"></div><pre id="overlayDetails" style="display:none"></pre><button id="overlayBuild" style="display:none">Build project</button></div>
+        </div>
     </div>
     <div id="xamlError" class="xaml-error"></div>
     <script nonce="${nonce}">window.previewerInit = ${JSON.stringify(init)};</script>

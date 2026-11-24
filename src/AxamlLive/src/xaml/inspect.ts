@@ -3,6 +3,8 @@ import { localName, parseXml, XmlElement } from "./xmlTree";
 /** One step of the logical tree path that the designer hook reports: type name and index among same-type siblings. */
 export interface PathStep {
     type: string;
+    /** Full type name: finds the .axaml of a view (its x:Class) when the path continues inside it. */
+    fullType?: string;
     index: number;
 }
 
@@ -33,14 +35,36 @@ function logicalChildren(el: XmlElement): XmlElement[] {
  * background borders, see applyThemeVariant): they are on the path but not in the file.
  * `pathIndex` is the index of the matched step, for its bounds.
  */
-let lastParsed: { xaml: string; root: XmlElement | undefined } | undefined;
+const parsedTexts = new Map<string, XmlElement | undefined>();
 
-/** The parsed document, reused while the pointer moves over the same preview (the text only changes with an update). */
+/**
+ * Parsed documents, reused while the pointer moves over the same preview (the texts only change with an update). A
+ * few are kept: the previewed file and the views it shows.
+ */
 function parsed(xaml: string): XmlElement | undefined {
-    if (lastParsed?.xaml !== xaml) {
-        lastParsed = { xaml, root: parseXml(xaml)?.root };
+    if (!parsedTexts.has(xaml)) {
+        if (parsedTexts.size >= 8) {
+            parsedTexts.delete(parsedTexts.keys().next().value!);
+        }
+        parsedTexts.set(xaml, parseXml(xaml)?.root);
     }
-    return lastParsed.root;
+    return parsedTexts.get(xaml);
+}
+
+/** Follows `path` from `start` (the element of step `from - 1`) as far as the XAML has the steps. */
+function descend(start: XmlElement, path: PathStep[], from: number): { element: XmlElement; pathIndex: number } {
+    let current = start;
+    let matched = from - 1;
+    for (let i = from; i < path.length; i++) {
+        const step = path[i];
+        const next = logicalChildren(current).filter((c) => localName(c.name) === step.type)[step.index];
+        if (!next) {
+            break;
+        }
+        current = next;
+        matched = i;
+    }
+    return { element: current, pathIndex: matched };
 }
 
 export function findElementByPath(
@@ -68,16 +92,66 @@ export function findElementByPath(
         return undefined;
     }
 
-    let current = start;
-    let matched = index;
-    for (let i = index + 1 + skip; i < path.length; i++) {
-        const step = path[i];
-        const next = logicalChildren(current).filter((c) => localName(c.name) === step.type)[step.index];
-        if (!next) {
-            break;
-        }
-        current = next;
-        matched = i;
+    const found = descend(start, path, index + 1 + skip);
+    // nothing below the wrappers matched: the start element itself
+    return found.pathIndex < index + 1 + skip ? { element: start, pathIndex: index } : found;
+}
+
+/** An .axaml file and its text (the editor's when it is open). */
+export interface ViewSource {
+    file: string;
+    text: string;
+}
+
+export interface ViewMatch extends ViewSource {
+    element: XmlElement;
+    pathIndex: number;
+}
+
+/**
+ * Like findElementByPath, and continues inside other views: when the path leaves the file at a control that is a view
+ * of its own (a UserControl with x:Class, used as `<v:Card />` or created by a data template or an item container),
+ * the rest of the path is matched in that view's file, and so on for views inside views. `resolveView` returns the
+ * file whose x:Class is the given full type name.
+ */
+export function findElementAcrossViews(
+    main: ViewSource,
+    path: PathStep[],
+    wrapperDepth: number,
+    resolveView: (fullType: string) => ViewSource | undefined
+): ViewMatch | undefined {
+    const first = findElementByPath(main.text, path, wrapperDepth);
+    if (!first) {
+        return undefined;
     }
-    return { element: current, pathIndex: matched };
+    let match: ViewMatch = { ...main, ...first };
+    for (;;) {
+        const next = continueInView(match, path, resolveView);
+        if (!next) {
+            return match;
+        }
+        match = next;
+    }
+}
+
+function continueInView(
+    match: ViewMatch,
+    path: PathStep[],
+    resolveView: (fullType: string) => ViewSource | undefined
+): ViewMatch | undefined {
+    for (let j = match.pathIndex; j < path.length; j++) {
+        // the matched element continues in its own file only when it is the view itself (<v:Card />)
+        if (j === match.pathIndex && localName(match.element.name) !== path[j].type) {
+            continue;
+        }
+        const fullType = path[j].fullType;
+        const view = fullType ? resolveView(fullType) : undefined;
+        const root = view && view.file !== match.file ? parsed(view.text) : undefined;
+        if (!view || !root) {
+            continue;
+        }
+        // the view's root element is the control of step j; its content follows (or the root, when none matches)
+        return { ...view, ...descend(root, path, j + 1) };
+    }
+    return undefined;
 }

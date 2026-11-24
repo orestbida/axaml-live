@@ -180,7 +180,9 @@ internal static class StartupHook {
                     sb.Append(',');
                 }
 
-                sb.Append("{\"type\":").Append(Json.String(name)).Append(",\"index\":").Append(index);
+                // the full name finds the .axaml of a view (its x:Class) when the path continues inside it
+                sb.Append("{\"type\":").Append(Json.String(name)).Append(",\"fullType\":").Append(Json.String(e.GetType().FullName ?? name))
+                    .Append(",\"index\":").Append(index);
                 AppendBounds(sb, e, root);
                 sb.Append('}');
             }

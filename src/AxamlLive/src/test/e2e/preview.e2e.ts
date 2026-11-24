@@ -271,6 +271,101 @@ suite("Avalonia previewer (e2e)", () => {
         }
     });
 
+    test("typing into a TextBox in the preview: the designer keeps running and paints the text", async () => {
+        const file = path.join(path.dirname(mainWindow), "E2eTyping.axaml");
+        fs.writeFileSync(
+            file,
+            `<UserControl xmlns="https://github.com/avaloniaui" Width="300" Height="120">\n` +
+                `  <TextBox Width="200" Height="32" HorizontalAlignment="Center" VerticalAlignment="Center" />\n` +
+                `</UserControl>`
+        );
+        try {
+            const before = await state();
+            await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(file), vscode.ViewColumn.One);
+            await waitFor(
+                "typing view",
+                (s) => sizeIs(s, 300, 120) && (s.xamlResults ?? 0) > (before.xamlResults ?? 0) && noXamlError(s),
+                30000
+            );
+            await previewCommand({ type: "setInput", enabled: true });
+            await sleep(800);
+            const s0 = await state();
+            await previewCommand({ type: "input", kind: "pointerPressed", x: 150, y: 60, button: 1, modifiers: [4] });
+            await previewCommand({ type: "input", kind: "pointerReleased", x: 150, y: 60, button: 1, modifiers: [] });
+            await sleep(800);
+            const focused = frames(await state());
+            for (const ch of ["a", "b", "c"]) {
+                await previewCommand({ type: "input", kind: "key", isDown: true, key: ch, modifiers: [] });
+                await previewCommand({ type: "input", kind: "text", text: ch, modifiers: [] });
+                await previewCommand({ type: "input", kind: "key", isDown: false, key: ch, modifiers: [] });
+            }
+            // a wrong text input message id made the designer drop the connection: no more frames, then a restart
+            await waitFor("frames after typing", (s) => frames(s) > focused, 10000);
+            await sleep(1500);
+            const after = await state();
+            assert.strictEqual(after.sessionState, "ready", "the designer keeps running after text input");
+            assert.strictEqual(after.sessionsStarted, s0.sessionsStarted, "text input must not restart the designer");
+            assert.strictEqual(after.crashes ?? 0, s0.crashes ?? 0, "no designer crash");
+        } finally {
+            await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(file), vscode.ViewColumn.One);
+            await vscode.commands.executeCommand("workbench.action.closeActiveEditor");
+            fs.rmSync(file, { force: true });
+            await showMain();
+            await waitFor("main window again", (s) => !!s.file && samePathLike(s.file, mainWindow) && !sizeIs(s, 300, 120), 30000);
+        }
+    });
+
+    test("custom size: typed, dragged with the frame's handles, remembered; rulers", async () => {
+        await showMain();
+        try {
+            await previewCommand({ type: "zoom", zoom: 1 });
+            // choosing Custom without a size: starts from the size shown now; then a typed size
+            await previewCommand({ type: "setFormFactor", id: "custom", rotated: false, width: 640, height: 400 });
+            await previewCommand({ type: "setCustomSize", width: 640, height: 400 });
+            let s = await waitFor("640 x 400", (s) => sizeIs(s, 640, 400), 30000);
+            assert.strictEqual((s.preview as any).formFactor, "custom");
+
+            // dragging the corner 100 px right and 60 px down at 100% zoom: 740 x 460
+            await previewCommand({ type: "testDrag", edge: "se", dx: 100, dy: 60 });
+            s = await waitFor("dragged to 740 x 460", (s) => sizeIs(s, 740, 460), 30000);
+            assert.deepStrictEqual((s.preview as any).customSize, { width: 740, height: 460 });
+            // the right edge changes only the width, the bottom edge only the height
+            await previewCommand({ type: "testDrag", edge: "e", dx: -140, dy: 50 });
+            await waitFor("width 600", (s) => sizeIs(s, 600, 460), 30000);
+            await previewCommand({ type: "testDrag", edge: "s", dx: 80, dy: -60 });
+            await waitFor("height 400", (s) => sizeIs(s, 600, 400), 30000);
+
+            // rulers on, then a screenshot of the toolbar fields, handles and rulers
+            await previewCommand({ type: "setRulers", on: true });
+            s = await state();
+            assert.strictEqual((s.preview as any).rulers, true);
+            await checkpoint("custom-size-rulers");
+            // the rulers follow the zoom (tick spacing and labels) and the theme
+            await previewCommand({ type: "zoom", zoom: 0.5 });
+            await checkpoint("custom-size-rulers-50");
+            await previewCommand({ type: "zoom", zoom: 2 });
+            await checkpoint("custom-size-rulers-200");
+            await previewCommand({ type: "zoom", zoom: 1 });
+            const themed = (await state()).xamlResults ?? 0;
+            await previewCommand({ type: "setTheme", value: "Dark" });
+            await waitFor("dark", (s) => (s.xamlResults ?? 0) > themed, 30000);
+            await checkpoint("custom-size-rulers-dark");
+            await previewCommand({ type: "setTheme", value: "Default" });
+
+            // another size and back to Custom: the custom size is remembered
+            await previewCommand({ type: "setFormFactor", id: "phone", rotated: false });
+            await waitFor("phone", (s) => sizeIs(s, 390, 844), 30000);
+            await checkpoint("device-with-rulers");
+            await previewCommand({ type: "setFormFactor", id: "custom", rotated: false });
+            await waitFor("custom again", (s) => sizeIs(s, 600, 400), 30000);
+            await checkpoint("custom-size-again");
+        } finally {
+            await previewCommand({ type: "setRulers", on: false });
+            await previewCommand({ type: "setFormFactor", id: "default", rotated: false });
+            await waitFor("design size again", (s) => (s.preview as any)?.formFactor === "default" && !sizeIs(s, 600, 400), 30000);
+        }
+    });
+
     test("mouse input is forwarded only when enabled", async () => {
         const { w, h } = designSize();
         const x = (w || 400) / 2;
@@ -456,7 +551,7 @@ suite("Avalonia previewer (e2e)", () => {
                 );
                 assert.ok(
                     frames(s1) > f0 + 5,
-                    `animation stopped after switching to ${ff.id}: ${frames(s1) - f0} frames/s ${JSON.stringify({ frame: s1.preview?.frame, fps: s1.preview?.recentFps, dc: s1.designDataContext, xaml: s1.lastXaml })}`
+                    `animation stopped after switching to ${ff.id}: ${frames(s1) - f0} frames/s ${JSON.stringify({ frame: s1.preview?.frame, fps: s1.preview?.recentFps, dc: s1.designDataContext, xaml: s1.lastXaml, trace: (s1 as any).trace, session: (s1 as any).sessionTrace })}`
                 );
             }
             await previewCommand({ type: "setTheme", value: "Dark" });
@@ -706,6 +801,92 @@ suite("Avalonia previewer (e2e)", () => {
         await vscode.commands.executeCommand("axamlLive.createPreviewerAssets");
         await waitFor("previewer restarted after Build command", (s) => s.sessionsStarted > started && s.sessionState === "ready", 180000);
         await checkpoint("after-build-command");
+    });
+
+    test("select mode inside a view used by the previewed view selects in that view's file", async () => {
+        const dir = path.dirname(mainWindow);
+        const ns = /namespace\s+([\w.]+)/.exec(fs.readFileSync(`${mainWindow}.cs`, "utf8"))![1];
+        const xmlns = `xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"`;
+        const child = path.join(dir, "E2eChild.axaml");
+        const host = path.join(dir, "E2eHost.axaml");
+        fs.writeFileSync(
+            child,
+            `<UserControl ${xmlns} x:Class="${ns}.E2eChild">\n` +
+                `  <StackPanel>\n` +
+                `    <Button x:Name="ChildButton" Content="Child" Height="40" />\n` +
+                `  </StackPanel>\n` +
+                `</UserControl>`
+        );
+        fs.writeFileSync(
+            `${child}.cs`,
+            `using Avalonia.Controls;\nnamespace ${ns};\npublic partial class E2eChild : UserControl { public E2eChild() { InitializeComponent(); } }\n`
+        );
+        fs.writeFileSync(
+            host,
+            `<UserControl ${xmlns} xmlns:v="using:${ns}" Width="300" Height="200">\n` +
+                `  <StackPanel Margin="10">\n` +
+                `    <TextBlock Text="Host" Height="20" />\n` +
+                `    <v:E2eChild />\n` +
+                `  </StackPanel>\n` +
+                `</UserControl>`
+        );
+        const select = [0, 1, 2, 3];
+        try {
+            // the child view is compiled into the app: the designer creates it from the assembly
+            const builds = (await state()).builds ?? 0;
+            await vscode.commands.executeCommand("axamlLive.createPreviewerAssets");
+            await waitFor(
+                "build with the child view",
+                (s) => (s.builds ?? 0) > builds && !s.building && s.sessionState === "ready",
+                180000
+            );
+            assert.ok(!/Build failed/.test((await state()).panelState?.message ?? ""), "the app builds with the child view");
+            const before = await state();
+            await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(host), vscode.ViewColumn.One);
+            await waitFor(
+                "host view",
+                (s) => sizeIs(s, 300, 200) && (s.xamlResults ?? 0) > (before.xamlResults ?? 0) && noXamlError(s),
+                120000
+            );
+            await waitFor("designer hook ready", (s: any) => !!s.lastInspect, 30000);
+            await sleep(800);
+
+            const last = (await state()) as any;
+            // the child's button: below the 20 px title, inside the 10 px margin
+            await previewCommand({
+                type: "input",
+                kind: "pointerPressed",
+                x: 40,
+                y: 50,
+                button: 1,
+                modifiers: [...select, 4],
+                select: true,
+            });
+            await previewCommand({ type: "input", kind: "pointerReleased", x: 40, y: 50, button: 1, modifiers: select, select: true });
+            await waitFor("select report", (s: any) => s.lastInspect?.kind === "select" && s.lastInspect !== last.lastInspect, 10000);
+            await sleep(800);
+
+            const s = (await state()) as any;
+            const ed = vscode.window.visibleTextEditors.find((e) => samePathLike(e.document.uri.fsPath, child));
+            console.log(`[e2e] select inside a child view: ${s.lastHighlight} ${ed?.document.getText(ed.selection)}`);
+            assert.ok(ed, "the child view's file is shown");
+            assert.deepStrictEqual([ed!.selection.start.line, ed!.document.getText(ed!.selection)], [2, "Button"]);
+            assert.strictEqual(s.lastHighlight, "Button ChildButton · E2eChild.axaml");
+            assert.ok(samePathLike(s.file, host), "the preview stays on the view being inspected");
+        } finally {
+            for (const f of [child, host]) {
+                const open = vscode.window.visibleTextEditors.find((e) => samePathLike(e.document.uri.fsPath, f));
+                if (open) {
+                    await vscode.window.showTextDocument(open.document, open.viewColumn);
+                    await vscode.commands.executeCommand("workbench.action.closeActiveEditor");
+                }
+            }
+            for (const f of [child, `${child}.cs`, host]) {
+                fs.rmSync(f, { force: true });
+            }
+            await showMain();
+            await waitFor("main window again", (s) => !!s.file && samePathLike(s.file, mainWindow), 30000);
+        }
     });
 
     test("a build still runs when another file is chosen right after it was asked for", async () => {

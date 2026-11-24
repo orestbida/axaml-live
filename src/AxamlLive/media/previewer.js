@@ -57,8 +57,32 @@
         }
     };
     $("theme").onchange = () => send({ type: "setTheme", value: $("theme").value });
-    $("formFactor").onchange = () => send({ type: "setFormFactor", id: $("formFactor").value, rotated: options.rotated });
-    $("rotate").onclick = () => send({ type: "setFormFactor", id: options.formFactor, rotated: !options.rotated });
+    $("formFactor").onchange = () => {
+        const id = $("formFactor").value;
+        // Custom starts from the remembered size, or from the size shown now
+        const size = logicalSize();
+        send({
+            type: "setFormFactor",
+            id,
+            rotated: options.rotated,
+            width: options.customWidth ?? (size && Math.round(size.w)),
+            height: options.customHeight ?? (size && Math.round(size.h)),
+        });
+    };
+    const customInputs = [$("customWidth"), $("customHeight")];
+    for (const input of customInputs) {
+        // Enter or leaving the field applies the typed size
+        input.onchange = () => send({ type: "setCustomSize", width: $("customWidth").value, height: $("customHeight").value });
+        input.onkeydown = (e) => {
+            if (e.key === "Enter") {
+                input.blur();
+            } else if (e.key === "Escape") {
+                input.value = String(input === $("customWidth") ? (options.customWidth ?? "") : (options.customHeight ?? ""));
+                input.blur();
+            }
+        };
+    }
+    $("rulers").onclick = () => send({ type: "setRulers", on: !options.rulers });
     $("input").onclick = () => send({ type: "setInput", enabled: !options.inputEnabled });
 
     // Toolbar menus drawn by the page instead of native <select> popups: in a webview without focus a native popup
@@ -212,6 +236,11 @@
             canvas.style.width = size.w * zoom + "px";
             canvas.style.height = size.h * zoom + "px";
         }
+        // the design size entry shows the size of the view as designed (known while it is shown)
+        const design = [...$("formFactor").options].find((o) => o.value === "default");
+        if (design && size && options.formFactor === "default") {
+            design.textContent = "Design size (" + Math.round(size.w) + "×" + Math.round(size.h) + ")";
+        }
         const known = typeof zoomMode === "string" ? zoomMode : String(zoomMode);
         if ([...zoomSelect.options].some((o) => o.value === known)) {
             zoomSelect.value = known;
@@ -222,6 +251,222 @@
         refreshDropdowns();
         reportView(stageW, stageH);
         renderHighlight();
+        renderOutline();
+        drawRulers();
+    }
+
+    // custom size: drag the frame's right edge, bottom edge or corner. The outline follows the pointer at once; the
+    // previewer gets the new size a few times per second while dragging, and the final size on release.
+    let drag = null; // { edge, x, y, w, h, zoom, width, height, sent }
+    function clampSize(v) {
+        return Math.round(Math.min(8000, Math.max(16, v)));
+    }
+    // after release the outline stays until a frame of the new size arrives (or a few seconds pass)
+    let pendingSize = null; // { width, height, until }
+    function renderOutline() {
+        const outline = $("resizeOutline");
+        if (pendingSize && Date.now() > pendingSize.until) {
+            pendingSize = null;
+        }
+        const target = drag || pendingSize;
+        outline.classList.toggle("show", !!target);
+        if (target) {
+            outline.style.width = target.width * zoom + "px";
+            outline.style.height = target.height * zoom + "px";
+            $("resizeLabel").textContent = target.width + " × " + target.height;
+        }
+    }
+    // each new size rebuilds the view in the designer: while dragging, only when the pointer pauses, and on release
+    function sendDragSize(final) {
+        clearTimeout(drag.timer);
+        const d = drag;
+        const flush = () => {
+            if (d.sent !== d.width + "x" + d.height) {
+                d.sent = d.width + "x" + d.height;
+                send({ type: "setCustomSize", width: d.width, height: d.height });
+            }
+        };
+        if (final) {
+            flush();
+        } else {
+            d.timer = setTimeout(flush, 200);
+        }
+    }
+    for (const handle of document.querySelectorAll(".resize-handle")) {
+        handle.addEventListener("pointerdown", (e) => {
+            const size = logicalSize();
+            if (!size || e.button !== 0) {
+                return;
+            }
+            e.preventDefault();
+            e.stopPropagation();
+            try {
+                // moves outside the handle keep coming to it while dragging
+                handle.setPointerCapture(e.pointerId);
+            } catch {
+                // a pointer that is not active (test events): moves are dispatched to the handle anyway
+            }
+            // a fitting zoom would change with every new size under the pointer: keep the current zoom while dragging
+            if (typeof zoomMode === "string") {
+                setZoom(zoom);
+            }
+            const w = Math.round(size.w);
+            const h = Math.round(size.h);
+            drag = { edge: handle.dataset.edge, x: e.clientX, y: e.clientY, w, h, zoom, width: w, height: h, sent: w + "x" + h, timer: 0 };
+            renderOutline();
+        });
+        handle.addEventListener("pointermove", (e) => {
+            if (!drag) {
+                return;
+            }
+            if (drag.edge.includes("e")) {
+                drag.width = clampSize(drag.w + (e.clientX - drag.x) / drag.zoom);
+            }
+            if (drag.edge.includes("s")) {
+                drag.height = clampSize(drag.h + (e.clientY - drag.y) / drag.zoom);
+            }
+            $("customWidth").value = String(drag.width);
+            $("customHeight").value = String(drag.height);
+            renderOutline();
+            sendDragSize(false);
+        });
+        const end = () => {
+            if (!drag) {
+                return;
+            }
+            sendDragSize(true);
+            const size = logicalSize();
+            const reached = size && Math.round(size.w) === drag.width && Math.round(size.h) === drag.height;
+            pendingSize = reached ? null : { width: drag.width, height: drag.height, until: Date.now() + 4000 };
+            drag = null;
+            renderOutline();
+            if (pendingSize) {
+                setTimeout(renderOutline, 4100);
+            }
+        };
+        handle.addEventListener("pointerup", end);
+        handle.addEventListener("pointercancel", end);
+    }
+
+    // rulers (toolbar toggle): logical pixels of the previewed view, 0 at the frame's top-left corner, following zoom
+    // and scrolling; a marker shows the pointer's position
+    const rulerTop = $("rulerTop");
+    const rulerLeft = $("rulerLeft");
+    let rulerPointer = null; // logical { x, y } of the pointer over the frame
+    let rulerFrame = 0;
+    function requestRulers() {
+        if (!rulerFrame) {
+            rulerFrame = requestAnimationFrame(() => {
+                rulerFrame = 0;
+                drawRulers();
+            });
+        }
+    }
+    stage.addEventListener("scroll", requestRulers);
+    canvas.addEventListener("pointermove", (e) => {
+        rulerPointer = { x: e.offsetX / zoom, y: e.offsetY / zoom };
+        requestRulers();
+    });
+    canvas.addEventListener("pointerleave", () => {
+        rulerPointer = null;
+        requestRulers();
+    });
+    function drawRulers() {
+        if (!options.rulers) {
+            return;
+        }
+        const css = getComputedStyle(document.body);
+        const color = (name, fallback) => css.getPropertyValue(name).trim() || fallback;
+        const fg = color("--vscode-editorLineNumber-foreground", "#858585");
+        const bg = color("--vscode-editor-background", "#1e1e1e");
+        const band = color("--vscode-editor-inactiveSelectionBackground", "rgba(128, 128, 128, 0.18)");
+        const accent = color("--vscode-focusBorder", "#007fd4");
+        const font = "10px " + (color("--vscode-font-family", "sans-serif") || "sans-serif");
+        const frameRect = canvas.getBoundingClientRect();
+        const size = logicalSize();
+        // tick spacing in logical pixels: minor ticks at least 6 px apart on screen, labels at least 50 px apart
+        const steps = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000];
+        const minor = steps.find((s) => s * zoom >= 6) ?? 10000;
+        const major = steps.find((s) => s >= minor * 5 && s * zoom >= 50) ?? minor * 10;
+        const dpr = window.devicePixelRatio || 1;
+        for (const [ruler, horizontal] of [
+            [rulerTop, true],
+            [rulerLeft, false],
+        ]) {
+            const w = ruler.clientWidth;
+            const h = ruler.clientHeight;
+            if (!w || !h) {
+                continue;
+            }
+            if (ruler.width !== Math.round(w * dpr) || ruler.height !== Math.round(h * dpr)) {
+                ruler.width = Math.round(w * dpr);
+                ruler.height = Math.round(h * dpr);
+            }
+            const g = ruler.getContext("2d");
+            g.setTransform(dpr, 0, 0, dpr, 0, 0);
+            g.fillStyle = bg;
+            g.fillRect(0, 0, w, h);
+            const rect = ruler.getBoundingClientRect();
+            const origin = horizontal ? frameRect.left - rect.left : frameRect.top - rect.top; // where logical 0 is
+            const length = horizontal ? w : h;
+            const depth = horizontal ? h : w;
+            if (size) {
+                // the frame's extent
+                g.fillStyle = band;
+                const extent = (horizontal ? size.w : size.h) * zoom;
+                if (horizontal) {
+                    g.fillRect(origin, 0, extent, h);
+                } else {
+                    g.fillRect(0, origin, w, extent);
+                }
+            }
+            g.strokeStyle = fg;
+            g.fillStyle = fg;
+            g.lineWidth = 1;
+            g.font = font;
+            g.textBaseline = "top";
+            const first = Math.floor(-origin / zoom / minor) * minor;
+            const last = (length - origin) / zoom;
+            g.beginPath();
+            for (let v = first; v <= last; v += minor) {
+                const p = Math.round(origin + v * zoom) + 0.5;
+                const isMajor = v % major === 0;
+                const tick = isMajor ? depth : v % (major / 2) === 0 && major / 2 >= minor ? depth * 0.45 : depth * 0.25;
+                if (horizontal) {
+                    g.moveTo(p, h - tick);
+                    g.lineTo(p, h);
+                } else {
+                    g.moveTo(w - tick, p);
+                    g.lineTo(w, p);
+                }
+            }
+            g.stroke();
+            for (let v = Math.ceil(first / major) * major; v <= last; v += major) {
+                const p = Math.round(origin + v * zoom);
+                if (horizontal) {
+                    g.fillText(String(v), p + 3, 1);
+                } else {
+                    // the narrow vertical ruler stacks the characters, one per line, below the tick (as image editors do)
+                    const text = String(v);
+                    for (let i = 0; i < text.length; i++) {
+                        g.fillText(text[i], 3, p + 2 + i * 9);
+                    }
+                }
+            }
+            if (rulerPointer) {
+                g.strokeStyle = accent;
+                g.beginPath();
+                const p = Math.round(origin + (horizontal ? rulerPointer.x : rulerPointer.y) * zoom) + 0.5;
+                if (horizontal) {
+                    g.moveTo(p, 0);
+                    g.lineTo(p, h);
+                } else {
+                    g.moveTo(0, p);
+                    g.lineTo(w, p);
+                }
+                g.stroke();
+            }
+        }
     }
 
     /** Tells the extension the effective zoom and the render scale needed for a sharp image. */
@@ -266,6 +511,13 @@
             0
         );
         if (sizeChanged) {
+            if (
+                pendingSize &&
+                Math.abs(f.width / f.scale - pendingSize.width) <= 1 &&
+                Math.abs(f.height / f.scale - pendingSize.height) <= 1
+            ) {
+                pendingSize = null; // the view is shown at the dragged size
+            }
             layout();
         }
     }
@@ -283,7 +535,13 @@
             highlightBox.style.width = r.width * zoom + "px";
             highlightBox.style.height = r.height * zoom + "px";
             highlightBox.classList.toggle("selected", !!r.selected);
-            $("highlightLabel").textContent = r.label;
+            const label = $("highlightLabel");
+            label.textContent = r.label;
+            // the frame clips what is outside it (device frames): no room above the box puts the label inside its top
+            // edge, and a label that would pass the right edge is aligned to the box's right side
+            const frameWidth = highlightBox.parentElement ? highlightBox.parentElement.clientWidth : Infinity;
+            highlightBox.classList.toggle("label-inside", r.y * zoom < label.offsetHeight);
+            highlightBox.classList.toggle("label-right", r.x * zoom + label.offsetWidth > frameWidth);
         }
     }
     function setSelectMode(on) {
@@ -438,6 +696,20 @@
             case "setZoom":
                 setZoom(msg.zoom);
                 break;
+            case "testDrag": {
+                // end-to-end tests: the same pointer events a mouse drag on the handle produces
+                const handle = document.querySelector(".handle-" + msg.edge);
+                const r = handle.getBoundingClientRect();
+                const x = r.left + r.width / 2;
+                const y = r.top + r.height / 2;
+                const at = (type, cx, cy) =>
+                    handle.dispatchEvent(new PointerEvent(type, { bubbles: true, clientX: cx, clientY: cy, button: 0, pointerId: 1 }));
+                at("pointerdown", x, y);
+                at("pointermove", x + msg.dx / 2, y + msg.dy / 2);
+                at("pointermove", x + msg.dx, y + msg.dy);
+                at("pointerup", x + msg.dx, y + msg.dy);
+                break;
+            }
             case "highlight":
                 highlight = msg.rect || null;
                 renderHighlight();
@@ -447,10 +719,21 @@
                 $("theme").value = options.theme;
                 $("formFactor").value = options.formFactor;
                 refreshDropdowns();
-                $("rotate").disabled = options.formFactor === "default";
                 $("input").classList.toggle("checked", options.inputEnabled);
                 $("input").setAttribute("aria-pressed", String(options.inputEnabled));
-                frameBox.classList.toggle("device", options.formFactor !== "default");
+                $("rulers").classList.toggle("checked", !!options.rulers);
+                $("rulers").setAttribute("aria-pressed", String(!!options.rulers));
+                $("stageArea").classList.toggle("rulers", !!options.rulers);
+                const custom = options.formFactor === "custom";
+                $("customSize").hidden = !custom;
+                for (const input of customInputs) {
+                    // not while the field is being typed into
+                    if (document.activeElement !== input && !drag) {
+                        input.value = String((input === $("customWidth") ? options.customWidth : options.customHeight) ?? "");
+                    }
+                }
+                frameBox.classList.toggle("custom", custom);
+                frameBox.classList.toggle("device", options.formFactor !== "default" && !custom);
                 canvas.style.cursor = selectMode ? "crosshair" : options.inputEnabled ? "default" : "not-allowed";
                 lastView = "";
                 layout();
@@ -459,7 +742,11 @@
                 const { state, xaml } = msg;
                 $("dot").className = "dot " + state.status;
                 $("status").textContent = state.message || state.status;
-                $("status").title = (state.message || state.status) + " (click to choose the previewer host)";
+                // details of a ready state (e.g. why there is no design data) are in the tooltip, not the toolbar
+                $("status").title =
+                    (state.status === "ready" && state.details ? state.details + "\n" : "") +
+                    (state.message || state.status) +
+                    " (click to choose the previewer host)";
                 $("build").disabled = state.status === "building";
                 $("overlay").className = "overlay" + (state.status !== "ready" ? " show" : "");
                 $("overlayText").textContent = state.message || "";

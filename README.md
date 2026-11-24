@@ -36,12 +36,16 @@ Open the folder, open an `.axaml` file and click **Show preview** in the editor 
 
 - The preview updates while you type; saving is not needed. To update it only on save, set
   `axamlLive.previewer.updateOn` to `save`.
-- Mouse, wheel and keyboard input is sent to the previewed UI. The mouse button in the toolbar turns this off.
-- Select an element (target button in the toolbar): click a control in the preview to select its element in the
-  editor. Esc ends select mode.
+- Mouse, wheel and keyboard input is sent to the previewed UI. The keyboard button in the toolbar turns this off.
+- Select an element (inspect button in the toolbar): click a control in the preview to select its element in the
+  editor, also inside views the file uses (the element is selected in that view's file). Esc ends select mode.
 - Zoom with -/+ or Ctrl+Wheel, or use Fit All and Fit Width. The preview is rendered at the zoomed size.
 - Theme: the app theme, Light or Dark.
-- Device sizes: desktop, laptop, phones and tablets, also rotated. Only the preview changes, not the file.
+- Sizes: the view's design size, Desktop (1920x1080), Phone (390x844) and Tablet (768x1024); landscape with
+  `axamlLive.previewer.defaultFormFactorRotated`. Only the preview changes, not the file.
+- Custom size: choose Custom in the size menu, then type the width and height, or drag the frame's right edge, bottom
+  edge or corner to see how the view behaves when its window is resized. The size is remembered.
+- Rulers (ruler button in the toolbar): along the top and left edges, in the view's pixels, 0 at the frame's corner.
 - Design data: a view with `x:DataType` (or named like `Views/FooView` with a `ViewModels/FooViewModel`) and no
   `Design.DataContext` is previewed with a new instance of its view model. If the view model cannot be created, for
   example because it needs constructor arguments, the preview shows the view without data and says why. The quick fix

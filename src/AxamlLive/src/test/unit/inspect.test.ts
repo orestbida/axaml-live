@@ -1,5 +1,5 @@
 import * as assert from "assert";
-import { findElementByPath } from "../../xaml/inspect";
+import { findElementAcrossViews, findElementByPath } from "../../xaml/inspect";
 import { themeWrapperDepth } from "../../xaml/designTransforms";
 
 const ns = `xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"`;
@@ -100,5 +100,110 @@ suite("select mode: theme wrapper depth", () => {
     });
     test("app theme: nothing is wrapped", () => {
         assert.strictEqual(themeWrapperDepth(`<UserControl ${ns}><Grid /></UserControl>`, "Default"), 0);
+    });
+});
+
+suite("select mode: views inside the previewed view", () => {
+    const main = {
+        file: "/app/MainWindow.axaml",
+        text: `<Window ${ns} xmlns:v="using:App" x:Class="App.MainWindow">
+    <StackPanel>
+        <v:Card />
+        <ContentControl Content="{Binding Page}" />
+    </StackPanel>
+</Window>`,
+    };
+    const card = {
+        file: "/app/Card.axaml",
+        text: `<UserControl ${ns} xmlns:v="using:App" x:Class="App.Card">
+    <StackPanel>
+        <TextBlock Text="title" />
+        <Button x:Name="Save" Content="Save" />
+        <v:Badge />
+    </StackPanel>
+</UserControl>`,
+    };
+    const badge = {
+        file: "/app/Badge.axaml",
+        text: `<UserControl ${ns} x:Class="App.Badge"><Border><TextBlock x:Name="Count" /></Border></UserControl>`,
+    };
+    const views = new Map([
+        ["App.Card", card],
+        ["App.Badge", badge],
+    ]);
+    const resolve = (t: string) => views.get(t);
+    const step = (type: string, index = 0, fullType?: string) => ({ type, index, fullType });
+
+    test("a view used by its type: the element inside its own file", () => {
+        const r = findElementAcrossViews(
+            main,
+            [step("MainWindow", 0, "App.MainWindow"), step("StackPanel"), step("Card", 0, "App.Card"), step("StackPanel"), step("Button")],
+            0,
+            resolve
+        );
+        assert.strictEqual(r?.file, card.file);
+        assert.strictEqual(tagAt(card.text, r!.element.start), `<Button x:Name="Save" Content="Save" />`);
+        assert.strictEqual(r!.pathIndex, 4);
+    });
+
+    test("a view created by a data template (not in the file): continues in its file", () => {
+        const r = findElementAcrossViews(
+            main,
+            [
+                step("MainWindow"),
+                step("StackPanel"),
+                step("ContentControl"),
+                step("Card", 0, "App.Card"),
+                step("StackPanel"),
+                step("TextBlock"),
+            ],
+            0,
+            resolve
+        );
+        assert.strictEqual(r?.file, card.file);
+        assert.strictEqual(tagAt(card.text, r!.element.start), `<TextBlock Text="title" />`);
+    });
+
+    test("a view inside a view inside the previewed view", () => {
+        const r = findElementAcrossViews(
+            main,
+            [
+                step("MainWindow"),
+                step("StackPanel"),
+                step("Card", 0, "App.Card"),
+                step("StackPanel"),
+                step("Badge", 0, "App.Badge"),
+                step("Border"),
+                step("TextBlock"),
+            ],
+            0,
+            resolve
+        );
+        assert.strictEqual(r?.file, badge.file);
+        assert.strictEqual(tagAt(badge.text, r!.element.start), `<TextBlock x:Name="Count" />`);
+        assert.strictEqual(r!.pathIndex, 6);
+    });
+
+    test("the view's own element when nothing inside it matches", () => {
+        const r = findElementAcrossViews(
+            main,
+            [step("MainWindow"), step("StackPanel"), step("Card", 0, "App.Card"), step("Grid")],
+            0,
+            resolve
+        );
+        assert.strictEqual(r?.file, card.file);
+        assert.ok(tagAt(card.text, r!.element.start).startsWith("<UserControl"));
+        assert.strictEqual(r!.pathIndex, 2);
+    });
+
+    test("a view without an .axaml in the workspace: the element that uses it", () => {
+        const r = findElementAcrossViews(
+            main,
+            [step("MainWindow"), step("StackPanel"), step("Card", 0, "App.Card"), step("StackPanel"), step("Button")],
+            0,
+            () => undefined
+        );
+        assert.strictEqual(r?.file, main.file);
+        assert.strictEqual(tagAt(main.text, r!.element.start), "<v:Card />");
     });
 });

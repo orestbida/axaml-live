@@ -52,7 +52,66 @@ function axamlFiles(dir: string): string[] {
     return out.sort();
 }
 
+/**
+ * E2E_INSPECT=1: select mode over each preview. The pointer moves over a grid of points and the highlighted elements are
+ * reported; elements inside other views (labels "Element · View.axaml") are counted, and one of them is clicked, which
+ * must select that element in its view's file while the preview stays on the file being inspected. Read-only too.
+ */
+const inspect = e2eSetting("E2E_INSPECT") === "1";
+const previewCommand = (msg: object) => vscode.commands.executeCommand("axamlLive.debug.previewCommand", msg);
+const selectModifiers = [0, 1, 2, 3]; // what the toolbar's select mode sends
+
+async function inspectPreview(file: string, frame: { logicalWidth: number; logicalHeight: number }, r: FileReport) {
+    await waitFor("designer hook", (s) => !!s.lastInspect, 30000);
+    const labels = new Map<string, { x: number; y: number }>();
+    const step = Math.max(25, Math.round(Math.min(frame.logicalWidth, frame.logicalHeight) / 10));
+    for (let y = 4; y < frame.logicalHeight; y += step) {
+        for (let x = 4; x < frame.logicalWidth; x += step) {
+            await previewCommand({ type: "input", kind: "pointerMoved", x, y, modifiers: selectModifiers, select: true });
+            await sleep(120);
+            const label: string | undefined = (await state()).lastHighlight;
+            if (label && !labels.has(label)) {
+                labels.set(label, { x, y });
+            }
+        }
+    }
+    r.inspected = [...labels.keys()];
+    const nested = [...labels.entries()].find(([label]) => label.includes(" · "));
+    if (!nested) {
+        return;
+    }
+    const [label, at] = nested;
+    const before = (await state()).lastInspect;
+    await previewCommand({
+        type: "input",
+        kind: "pointerPressed",
+        x: at.x,
+        y: at.y,
+        button: 1,
+        modifiers: [...selectModifiers, 4],
+        select: true,
+    });
+    await previewCommand({ type: "input", kind: "pointerReleased", x: at.x, y: at.y, button: 1, modifiers: selectModifiers, select: true });
+    await waitFor("select report", (s) => s.lastInspect?.kind === "select" && s.lastInspect !== before, 10000);
+    await sleep(800);
+    const viewFile = label.split(" · ").pop()!;
+    const element = label.split(" ")[0];
+    const editor = vscode.window.visibleTextEditors.find((e) => path.basename(e.document.uri.fsPath) === viewFile);
+    const s = await state();
+    r.nestedSelect =
+        `${label}: ` +
+        (editor ? `selected "${editor.document.getText(editor.selection)}" on line ${editor.selection.start.line + 1}` : "file not shown") +
+        (s.file?.toLowerCase() === file.toLowerCase() ? ", preview stayed" : `, preview moved to ${s.file}`);
+    if (!editor || editor.document.getText(editor.selection) !== element || s.file?.toLowerCase() !== file.toLowerCase()) {
+        r.ok = false;
+        r.crash = `nested select: ${r.nestedSelect}`;
+    }
+    await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(file), vscode.ViewColumn.One);
+}
+
 interface FileReport {
+    inspected?: string[];
+    nestedSelect?: string;
     file: string;
     ok: boolean;
     previewError?: string;
@@ -88,6 +147,14 @@ suite("All AXAML files (read-only)", () => {
                     (r.crash ? ` | ${r.crash}` : "") +
                     (r.diagnostics.length ? ` | diagnostics: ${r.diagnostics.join(" ; ")}` : "")
             );
+            if (r.inspected) {
+                const nested = r.inspected.filter((l) => l.includes(" · "));
+                console.log(
+                    `[inspect] ${r.file}: ${r.inspected.length} elements, ${nested.length} inside other views` +
+                        (nested.length ? ` (${nested.slice(0, 6).join(", ")})` : "") +
+                        (r.nestedSelect ? ` | click: ${r.nestedSelect}` : "")
+                );
+            }
         }
     });
 
@@ -135,6 +202,9 @@ suite("All AXAML files (read-only)", () => {
                 named.ok = false;
             }
             r.blank = !!frame && (frame.logicalWidth < 2 || frame.logicalHeight < 2);
+            if (inspect && frame && !r.blank) {
+                await inspectPreview(file, frame, r);
+            }
             if (frame && frame.avgLum < 5) {
                 console.log(
                     `[trace] ${rel} rendered black:\n  ${(after.trace ?? []).join("\n  ")}\n  -- session:\n  ${(after.sessionTrace ?? []).join("\n  ")}`
