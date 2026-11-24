@@ -2,6 +2,20 @@
 
 All notable changes to AXAML Live are documented in this file.
 
+## [0.2.2] - 24 November 2026
+
+- The preview handles file switches, edits, builds and restarts one at a time, so quick switches no longer start the
+  wrong host project and a build is never skipped.
+- Switching back to an unchanged file no longer reloads the preview (scroll position and typed input stay).
+- The preview renders at 2 fps while its tab is hidden.
+- Fixed: C# changes could be lost or out of date in completion, hover and diagnostics after a second project was
+  opened, or when a file was saved during a compilation.
+- Saving an .axaml file no longer recompiles the project unless named elements, x:Class or namespaces changed, and a
+  change in one project no longer recompiles unrelated ones.
+- Editing an .axaml file that belongs to no project no longer parses the solution on every edit.
+- A project that fails to load no longer holds up other projects; loading is tried again with a growing wait.
+- Fixed: a mouse move could be sent after the button release; solution data is written atomically.
+
 ## [0.2.1] - 24 November 2026
 
 - Fixed: with .axaml files of two projects open, the language server could keep recompiling both projects and check
