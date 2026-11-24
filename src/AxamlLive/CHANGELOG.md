@@ -2,6 +2,15 @@
 
 All notable changes to AXAML Live are documented in this file.
 
+## [0.1.2] - 24 November 2026
+
+- Run button in the editor title bar of .axaml files: builds and starts the app.
+- New setting `axamlLive.previewer.updateOn`: update the preview while you type (default) or only when the file is
+  saved.
+- Fixed: after a XAML error was fixed, bound content was missing from the preview until it was restarted.
+- Fixed: the zoom, theme and device menus in the preview toolbar could close right after opening.
+- Fixed: completion could miss C# changes that were saved at the same time as an .axaml file.
+
 ## [0.1.1] - 24 November 2026
 
 - New extension icon.
