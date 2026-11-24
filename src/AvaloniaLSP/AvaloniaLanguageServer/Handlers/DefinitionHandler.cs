@@ -25,7 +25,7 @@ public sealed class DefinitionHandler : DefinitionHandlerBase {
     protected override DefinitionRegistrationOptions CreateRegistrationOptions(DefinitionCapability capability, ClientCapabilities clientCapabilities) =>
         new() { DocumentSelector = _documentSelector };
 
-    public override async Task<LocationOrLocationLinks> Handle(DefinitionParams request, CancellationToken cancellationToken) {
+    public override async Task<LocationOrLocationLinks?> Handle(DefinitionParams request, CancellationToken cancellationToken) {
         var uri = request.TextDocument.Uri;
         var text = _workspace.BufferService.GetText(uri);
         if (text == null) {
@@ -46,11 +46,24 @@ public sealed class DefinitionHandler : DefinitionHandlerBase {
             ElementTypeSymbol e => TypeLocations(compilation, e.Type.FullName, null),
             BindingMemberSymbol b => SymbolLocations(b.Member),
             EventHandlerSymbol h => compilation?.GetTypeByMetadataName(h.ClassFullName)?.GetMembers(h.Method).SelectMany(SymbolLocations) ?? Enumerable.Empty<Location>(),
-            ResourceKeySymbol r => analyzer.FindResourceKey(r.Key) is { } range ? new[] { new Location { Uri = uri, Range = range } } : Enumerable.Empty<Location>(),
+            ResourceKeySymbol r => analyzer.FindResourceKey(r.Key) is { } range
+                ? new[] { new Location { Uri = uri, Range = range } }
+                : ResourceInOtherFiles(r.Key, uri),
             _ => Enumerable.Empty<Location>(),
         };
         var list = locations.ToList();
         return new LocationOrLocationLinks(list.Select(l => new LocationOrLocationLink(l)));
+    }
+
+    /// <summary>Where a resource key is defined in the workspace's other .axaml files (App.axaml, dictionaries).</summary>
+    IEnumerable<Location> ResourceInOtherFiles(string key, DocumentUri current) {
+        var root = _getServer()?.Client.ClientSettings.RootPath ?? _workspace.ProjectInfo?.ProjectDirectory;
+        foreach (var file in AxamlFiles.All(root, _workspace.BufferService, current)) {
+            foreach (var d in ResourceKeys.In(file.Text).Where(d => d.Key == key)) {
+                var doc = new XamlDocument(file.Text);
+                yield return new Location { Uri = DocumentUri.FromFileSystemPath(file.Path), Range = doc.RangeOf(d.Offset, d.Length) };
+            }
+        }
     }
 
     /// <summary>Source locations of a type; without Roslyn (F#) falls back to the code-behind file of the document.</summary>

@@ -36,6 +36,19 @@ export function applyThemeVariant(xaml: string, variant: ThemeVariant | string):
     return wrapContent(xaml, previewWith ?? root, variant, !previewWith && !hasBackground);
 }
 
+/**
+ * How many elements applyThemeVariant wraps around the content (they are in the designer's logical tree but not in
+ * the file): 0, 1 (the theme scope) or 4 (the scope and the three theme background borders).
+ */
+export function themeWrapperDepth(xaml: string, variant: ThemeVariant | string): number {
+    const wrapped = applyThemeVariant(xaml, variant);
+    const added = (s: string) => wrapped.split(s).length - xaml.split(s).length;
+    if (added("<ThemeVariantScope ") <= 0) {
+        return 0;
+    }
+    return added("{DynamicResource SolidBackgroundFillColorBase}") > 0 ? 4 : 1;
+}
+
 export function applyDesignSize(xaml: string, width: number, height: number): string {
     const root = parseXml(xaml)?.root;
     if (!root) {
@@ -156,7 +169,7 @@ function applyEdits(text: string, edits: { start: number; end: number; text: str
 export function designDataHint(error: string): string {
     const ctor = /Unable to find public constructor for type (?:[\w.]+:)?([\w.]+)\(\)/.exec(error);
     if (ctor) {
-        return `no design data: ${ctor[1].split(".").pop()} has no parameterless constructor (add one for design time, or Design.DataContext)`;
+        return `no design data: ${ctor[1].split(".").pop()} has no parameterless constructor (quick fix on x:DataType: create a design-time view model)`;
     }
     return `no design data: ${error.split("\n")[0].slice(0, 120)}`;
 }

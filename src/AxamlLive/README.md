@@ -37,12 +37,15 @@ Open the folder, open an `.axaml` file and click **Show preview** in the editor 
 - The preview updates while you type; saving is not needed. To update it only on save, set
   `axamlLive.previewer.updateOn` to `save`.
 - Mouse, wheel and keyboard input is sent to the previewed UI. The mouse button in the toolbar turns this off.
+- Select an element (target button in the toolbar): click a control in the preview to select its element in the
+  editor. Esc ends select mode.
 - Zoom with -/+ or Ctrl+Wheel, or use Fit All and Fit Width. The preview is rendered at the zoomed size.
 - Theme: the app theme, Light or Dark.
 - Device sizes: desktop, laptop, phones and tablets, also rotated. Only the preview changes, not the file.
 - Design data: a view with `x:DataType` (or named like `Views/FooView` with a `ViewModels/FooViewModel`) and no
   `Design.DataContext` is previewed with a new instance of its view model. If the view model cannot be created, for
-  example because it needs constructor arguments, the preview shows the view without data and says why.
+  example because it needs constructor arguments, the preview shows the view without data and says why. The quick fix
+  on `x:DataType` creates a design-time view model for it.
 - Background for transparent views: light, dark or a custom color (`axamlLive.previewer.background`).
 - The previewer runs from a copy of the build output, so `dotnet build` is not blocked by locked files. After a build
   (toolbar **Build**, terminal, C# Dev Kit) the preview reloads.
@@ -56,7 +59,11 @@ Open the folder, open an `.axaml` file and click **Show preview** in the editor 
 
 ## Editing AXAML
 
-- Completion for elements, properties, markup extensions, resources and `x:` directives.
+- Completion for elements, properties, markup extensions and `x:` directives.
+- Completion of binding paths at any depth (`Customer.Address.City`), also in data templates with `x:DataType`, from
+  the C# source (no build needed).
+- Completion of resource keys (`{StaticResource ...}`) from this file, the project's other .axaml files and the themes;
+  go to definition and hover also find keys in other files.
 - Completion in style selectors (types, `.classes`, `:pseudo-classes`, `#names`, controls after `/template/`) and
   in `Classes="..."`, with the classes used in the project's .axaml files.
 - The type of compiled bindings is shown after them (`{Binding Name} : string`). Turn this off with
@@ -68,6 +75,10 @@ Open the folder, open an `.axaml` file and click **Show preview** in the editor 
 - Source-generated members (for example CommunityToolkit `[ObservableProperty]`) are known after the C# file is saved,
   without a build.
 - Show Code-behind (F7) and Show ViewModel (Shift+F7).
+- Outline view, breadcrumbs and Go to Symbol (Ctrl+Shift+O) for the element tree.
+- Snippets: `style`, `style^`, `setter`, `ct` (ControlTheme), `datatemplate`, `itemtemplate`, `designdc`, `grid`,
+  `resources`, `transitions`, `binding`.
+- The language server state is shown in the status bar (`{}` next to the language); click it to restart.
 - Format Document, with options for attribute wrapping, markup extension wrapping, blank lines and quote style.
 - Style badges after elements that a `Style` in the same file applies to; hovering a badge shows the selectors.
 

@@ -1,0 +1,85 @@
+{
+  "Style": {
+    "prefix": "style",
+    "description": "Style with a setter",
+    "body": ["<Style Selector=\"${1:Button}\">", "\t<Setter Property=\"${2:Background}\" Value=\"${3}\" />$0", "</Style>"]
+  },
+  "Nested style": {
+    "prefix": "style^",
+    "description": "Nested style for a pseudo-class of the parent selector",
+    "body": [
+      "<Style Selector=\"^:${1|pointerover,pressed,disabled,focus,checked,selected|}\">",
+      "\t<Setter Property=\"${2:Background}\" Value=\"${3}\" />$0",
+      "</Style>"
+    ]
+  },
+  "Setter": {
+    "prefix": "setter",
+    "description": "Setter",
+    "body": ["<Setter Property=\"${1:Background}\" Value=\"${2}\" />$0"]
+  },
+  "Control theme": {
+    "prefix": "ct",
+    "description": "ControlTheme with a template",
+    "body": [
+      "<ControlTheme x:Key=\"${1:Name}\" TargetType=\"${2:Button}\">",
+      "\t<Setter Property=\"Template\">",
+      "\t\t<ControlTemplate>",
+      "\t\t\t<ContentPresenter Name=\"PART_ContentPresenter\" Content=\"{TemplateBinding Content}\" />$0",
+      "\t\t</ControlTemplate>",
+      "\t</Setter>",
+      "</ControlTheme>"
+    ]
+  },
+  "Data template": {
+    "prefix": "datatemplate",
+    "description": "DataTemplate with a data type (compiled bindings)",
+    "body": ["<DataTemplate x:DataType=\"${1:vm:Item}\">", "\t$0", "</DataTemplate>"]
+  },
+  "Items template": {
+    "prefix": "itemtemplate",
+    "description": "ItemsControl.ItemTemplate with a DataTemplate",
+    "body": [
+      "<${1:ItemsControl}.ItemTemplate>",
+      "\t<DataTemplate x:DataType=\"${2:vm:Item}\">",
+      "\t\t$0",
+      "\t</DataTemplate>",
+      "</${1:ItemsControl}.ItemTemplate>"
+    ]
+  },
+  "Design data context": {
+    "prefix": "designdc",
+    "description": "Data context for the previewer only",
+    "body": ["<Design.DataContext>", "\t<${1:vm:MainViewModel} />", "</Design.DataContext>"]
+  },
+  "Binding": {
+    "prefix": "binding",
+    "description": "Binding markup extension",
+    "body": ["{Binding ${1:Path}}"]
+  },
+  "Grid": {
+    "prefix": "grid",
+    "description": "Grid with columns and rows",
+    "body": ["<Grid ColumnDefinitions=\"${1:Auto,*}\" RowDefinitions=\"${2:Auto,*}\">", "\t$0", "</Grid>"]
+  },
+  "Resources": {
+    "prefix": "resources",
+    "description": "Resources of the root element",
+    "body": [
+      "<${1:UserControl}.Resources>",
+      "\t<${2:SolidColorBrush} x:Key=\"${3:Key}\" ${4:Color}=\"${5}\" />$0",
+      "</${1:UserControl}.Resources>"
+    ]
+  },
+  "Transitions": {
+    "prefix": "transitions",
+    "description": "Property transitions",
+    "body": [
+      "<${1:Border}.Transitions>",
+      "\t<Transitions>",
+      "\t\t<${2|BrushTransition,DoubleTransition,ThicknessTransition,TransformOperationsTransition|} Property=\"${3:Background}\" Duration=\"${4:0:0:0.2}\" />",
+      "\t</Transitions>",
+      "</${1:Border}.Transitions>"
+    ]
+  }
+}

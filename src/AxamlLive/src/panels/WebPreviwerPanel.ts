@@ -4,6 +4,7 @@ import { AppConstants } from "../util/Utilities";
 import { getNonce } from "../util/getNouce";
 import { formFactors } from "../xaml/formFactors";
 import * as zlib from "zlib";
+import * as fs from "fs";
 import { changedRect, cropRows } from "../services/frameStats";
 
 export type PanelStatus = "idle" | "starting" | "building" | "ready" | "error";
@@ -214,6 +215,11 @@ export class WebPreviewerPanel implements vscode.Disposable {
         this._panel.webview.postMessage({ type: "setZoom", zoom });
     }
 
+    /** Select mode: box around the control under the pointer (logical coordinates of the previewed view). */
+    public setHighlight(rect: { x: number; y: number; width: number; height: number; label: string; selected: boolean } | undefined) {
+        this._panel.webview.postMessage({ type: "highlight", rect });
+    }
+
     private postState() {
         this._panel.webview.postMessage({ type: "state", state: this._state, xaml: this._xaml });
     }
@@ -244,7 +250,17 @@ export class WebPreviewerPanel implements vscode.Disposable {
         const codicons = webview.asWebviewUri(
             vscode.Uri.joinPath(this._extensionUri, "node_modules", "@vscode", "codicons", "dist", "codicon.css")
         );
-        const media = (f: string) => webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, "media", f));
+        // the file's modification time in the URL: a webview may otherwise keep an older copy of a changed file
+        const media = (f: string) => {
+            const uri = vscode.Uri.joinPath(this._extensionUri, "media", f);
+            let stamp = "";
+            try {
+                stamp = String(Math.round(fs.statSync(uri.fsPath).mtimeMs));
+            } catch {
+                // not on disk (remote file system): no stamp
+            }
+            return webview.asWebviewUri(uri).with({ query: stamp ? `v=${stamp}` : "" });
+        };
         const config = vscode.workspace.getConfiguration("axamlLive.previewer");
         const init = {
             defaultZoom: config.get<number | string>("defaultZoom", 1),
@@ -278,6 +294,7 @@ export class WebPreviewerPanel implements vscode.Disposable {
             <span class="select"><select id="formFactor" title="Form factor"></select></span>
             <button id="rotate" class="action codicon codicon-arrow-swap" title="Rotate"></button>
             <button id="input" class="action codicon codicon-inspect" title="Mouse and keyboard input to the preview" aria-pressed="true"></button>
+            <button id="selectElement" class="action codicon codicon-target" title="Select an element: click it to go to its XAML (Esc to stop)" aria-pressed="false"></button>
         </div>
         <span class="sep"></span>
         <div class="group">
@@ -287,7 +304,7 @@ export class WebPreviewerPanel implements vscode.Disposable {
         </div>
     </div>
     <div id="stage" class="stage">
-        <div id="frameBox" class="frame-box"><canvas id="canvas" tabindex="0"></canvas></div>
+        <div id="frameBox" class="frame-box"><canvas id="canvas" tabindex="0"></canvas><div id="highlight" class="highlight"><span id="highlightLabel"></span></div></div>
         <div id="overlay" class="overlay"><div id="overlayText"></div><pre id="overlayDetails" style="display:none"></pre><button id="overlayBuild" style="display:none">Build project</button></div>
     </div>
     <div id="xamlError" class="xaml-error"></div>

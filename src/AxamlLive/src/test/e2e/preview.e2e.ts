@@ -136,6 +136,76 @@ suite("Avalonia previewer (e2e)", () => {
         return { w: Number(/d:DesignWidth="(\d+)"/.exec(t)?.[1] ?? 0), h: Number(/d:DesignHeight="(\d+)"/.exec(t)?.[1] ?? 0) };
     };
 
+    test("select mode: clicking a control in the preview selects its element in the editor", async () => {
+        await showMain();
+        const file = path.join(path.dirname(mainWindow), "E2eSelect.axaml");
+        fs.writeFileSync(
+            file,
+            `<UserControl xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Width="300" Height="200">
+` +
+                `  <StackPanel Margin="10" Spacing="10">
+` +
+                `    <TextBlock Text="Title" />
+` +
+                `    <Button x:Name="FirstButton" Content="First" />
+` +
+                `    <Border Height="60" Background="Gray">
+` +
+                `      <Button Content="Inner" VerticalAlignment="Center" />
+` +
+                `    </Border>
+` +
+                `  </StackPanel>
+` +
+                `</UserControl>`
+        );
+        const select = [0, 1, 2, 3]; // Alt, Control, Shift, Windows: what the toolbar's select mode sends
+        const click = async (x: number, y: number) => {
+            const before = (await state()) as any;
+            await previewCommand({ type: "input", kind: "pointerPressed", x, y, button: 1, modifiers: [...select, 4], select: true });
+            await previewCommand({ type: "input", kind: "pointerReleased", x, y, button: 1, modifiers: select, select: true });
+            await waitFor("select report", (s: any) => s.lastInspect?.kind === "select" && s.lastInspect !== before.lastInspect, 10000);
+            await sleep(500);
+            const ed = vscode.window.visibleTextEditors.find((e) => samePathLike(e.document.uri.fsPath, file))!;
+            return {
+                line: ed.selection.start.line,
+                text: ed.document.getText(ed.selection),
+                label: ((await state()) as any).lastHighlight,
+            };
+        };
+        try {
+            const before = await state();
+            await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(file), vscode.ViewColumn.One);
+            await waitFor(
+                "select view",
+                (s) => sizeIs(s, 300, 200) && (s.xamlResults ?? 0) > (before.xamlResults ?? 0) && noXamlError(s),
+                30000
+            );
+            await waitFor("designer hook ready", (s: any) => !!s.lastInspect, 30000);
+            await sleep(800);
+
+            const first = await click(30, 50);
+            console.log(`[e2e] select first button: ${JSON.stringify(first)}`);
+            assert.deepStrictEqual([first.line, first.text, first.label], [3, "Button", "Button FirstButton"]);
+
+            // a dark theme wraps the content in a theme scope and background borders that are not in the file
+            const results = (await state()).xamlResults ?? 0;
+            await previewCommand({ type: "setTheme", value: "Dark" });
+            await waitFor("dark preview", (s) => (s.xamlResults ?? 0) > results && noXamlError(s), 30000);
+            await sleep(800);
+            const inner = await click(30, 112);
+            console.log(`[e2e] select inner button (dark theme): ${JSON.stringify(inner)}`);
+            assert.deepStrictEqual([inner.line, inner.text], [5, "Button"]);
+        } finally {
+            await previewCommand({ type: "setTheme", value: "Default" });
+            await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(file), vscode.ViewColumn.One);
+            await vscode.commands.executeCommand("workbench.action.closeActiveEditor");
+            fs.rmSync(file, { force: true });
+            await showMain();
+            await waitFor("main window again", (s) => !!s.file && samePathLike(s.file, mainWindow) && !sizeIs(s, 300, 200), 30000);
+        }
+    });
+
     test("frames are rendered by the extension (own previewer renderer)", async () => {
         const s = await waitFor("a frame", (s) => !!s.preview?.frame, 30000);
         const { w, h } = designSize();
@@ -759,6 +829,279 @@ suite("Avalonia previewer (e2e)", () => {
         }
     });
 
+    test("nested binding paths and data templates: completion, hints and errors", async () => {
+        const vmDir = [path.join(workspace, "ViewModels"), path.join(workspace, path.basename(workspace), "ViewModels")].find((d) =>
+            fs.existsSync(path.join(d, "ViewModelBase.cs"))
+        );
+        if (!vmDir) {
+            console.log("[e2e] skipped: not a C# MVVM project");
+            return;
+        }
+        const ns = /namespace\s+([\w.]+)/.exec(fs.readFileSync(path.join(vmDir, "ViewModelBase.cs"), "utf8"))![1];
+        const cs = path.join(vmDir, "E2eNested.cs");
+        fs.writeFileSync(
+            cs,
+            `namespace ${ns};\n` +
+                `public class E2eAddress { public string City { get; set; } = ""; public int Zip { get; set; } }\n` +
+                `public class E2eOrder { public decimal Total { get; set; } public string Product { get; set; } = ""; }\n` +
+                `public class E2eCustomer { public string Name { get; set; } = ""; public E2eAddress Address { get; set; } = new(); public System.Collections.Generic.List<E2eOrder> Orders { get; } = new(); }\n` +
+                `public class E2eCustomerViewModel { public E2eCustomer Customer { get; } = new(); }\n`
+        );
+        const file = path.join(path.dirname(mainWindow), "E2eNested.axaml");
+        const template = (a: string, b: string, c: string) =>
+            `<UserControl xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"\n` +
+            `             xmlns:vm="using:${ns}" x:DataType="vm:E2eCustomerViewModel">\n` +
+            `  <StackPanel>\n` +
+            `    <TextBlock Text="{Binding ${a}}" />\n` +
+            `    <TextBlock Text="{Binding ${b}}" />\n` +
+            `    <ItemsControl ItemsSource="{Binding Customer.Orders}">\n` +
+            `      <ItemsControl.ItemTemplate>\n` +
+            `        <DataTemplate x:DataType="vm:E2eOrder">\n` +
+            `          <TextBlock Text="{Binding ${c}}" />\n` +
+            `        </DataTemplate>\n` +
+            `      </ItemsControl.ItemTemplate>\n` +
+            `    </ItemsControl>\n` +
+            `  </StackPanel>\n` +
+            `</UserControl>`;
+        fs.writeFileSync(file, template("Customer.Name", "Customer.Address.City", "Product"));
+        const doc = await vscode.workspace.openTextDocument(file);
+        const ed = await vscode.window.showTextDocument(doc, vscode.ViewColumn.One);
+        const setText = (text: string) =>
+            ed.edit((e) => e.replace(new vscode.Range(doc.positionAt(0), doc.positionAt(doc.getText().length)), text));
+        // the new C# file reaches the language server through its file watcher: retry until the members are known
+        const labelsAt = async (a: string, b: string, c: string, expected: string[]) => {
+            const text = template(a, b, c);
+            const marker = text.indexOf("|");
+            await setText(text.replace("|", ""));
+            let labels: string[] = [];
+            for (let i = 0; i < 15 && !expected.every((e) => labels.includes(e)); i++) {
+                const list = await vscode.commands.executeCommand<vscode.CompletionList>(
+                    "vscode.executeCompletionItemProvider",
+                    doc.uri,
+                    doc.positionAt(marker)
+                );
+                labels = list.items
+                    .map((it) => (typeof it.label === "string" ? it.label : it.label.label))
+                    .filter((l) => l !== "Build the project");
+                if (!expected.every((e) => labels.includes(e))) {
+                    await sleep(1000);
+                }
+            }
+            return labels;
+        };
+        try {
+            const cases: [string, [string, string, string], string[]][] = [
+                ["first level", ["|", "Customer.Name", "Product"], ["Customer"]],
+                ["second level", ["Customer.|", "Customer.Name", "Product"], ["Name", "Address", "Orders"]],
+                ["third level", ["Customer.Address.|", "Customer.Name", "Product"], ["City", "Zip"]],
+                ["data template", ["Customer.Name", "Customer.Name", "|"], ["Total", "Product"]],
+            ];
+            for (const [name, [a, b, c], expected] of cases) {
+                const labels = await labelsAt(a, b, c, expected);
+                console.log(`[e2e] binding completion ${name}: ${labels.slice(0, 15).join(", ")}`);
+                for (const e of expected) {
+                    assert.ok(labels.includes(e), `${name}: '${e}' missing (${labels.slice(0, 20).join(", ")})`);
+                }
+            }
+
+            await setText(template("Customer.Name", "Customer.Address.City", "Total"));
+            let hints: string[] = [];
+            for (let i = 0; i < 15 && hints.length < 3; i++) {
+                const list =
+                    (await vscode.commands.executeCommand<vscode.InlayHint[]>(
+                        "vscode.executeInlayHintProvider",
+                        doc.uri,
+                        new vscode.Range(0, 0, doc.lineCount, 0)
+                    )) ?? [];
+                hints = list.map(
+                    (h) => `${h.position.line}:${typeof h.label === "string" ? h.label : h.label.map((p) => p.value).join("")}`
+                );
+                if (hints.length < 3) {
+                    await sleep(1000);
+                }
+            }
+            console.log(`[e2e] nested hints: ${hints.join(" | ")}`);
+            assert.ok(hints.includes("3:: string"), "hint for Customer.Name");
+            assert.ok(hints.includes("4:: string"), "hint for Customer.Address.City");
+            assert.ok(hints.includes("8:: decimal"), "hint for Total in the data template");
+
+            await setText(template("Customer.Name", "Customer.Adress.City", "Totl"));
+            let messages: string[] = [];
+            for (let i = 0; i < 20 && messages.length < 2; i++) {
+                await sleep(500);
+                messages = vscode.languages.getDiagnostics(doc.uri).map((d) => d.message);
+            }
+            console.log(`[e2e] nested errors: ${messages.join(" | ")}`);
+            assert.ok(
+                messages.some((m) => m.includes("Adress")),
+                "misspelled nested member not reported"
+            );
+            assert.ok(
+                messages.some((m) => m.includes("Totl")),
+                "misspelled member in the data template not reported"
+            );
+        } finally {
+            await vscode.commands.executeCommand("workbench.action.revertAndCloseActiveEditor");
+            fs.rmSync(file, { force: true });
+            fs.rmSync(cs, { force: true });
+        }
+    });
+
+    test("resource keys from other files: completion, go to definition and hover", async () => {
+        const dir = path.dirname(mainWindow);
+        const dictionary = path.join(dir, "E2eResources.axaml");
+        fs.writeFileSync(
+            dictionary,
+            `<ResourceDictionary xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">\n` +
+                `  <SolidColorBrush x:Key="E2eAccentBrush" Color="#FF3366" />\n` +
+                `  <x:Double x:Key="E2eCardRadius">12</x:Double>\n` +
+                `</ResourceDictionary>`
+        );
+        const file = path.join(dir, "E2eUsesResources.axaml");
+        const text = (key: string) =>
+            `<UserControl xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">\n` +
+            `  <UserControl.Resources>\n` +
+            `    <SolidColorBrush x:Key="E2eLocalBrush" Color="Red" />\n` +
+            `  </UserControl.Resources>\n` +
+            `  <Border Background="{StaticResource ${key}}" />\n` +
+            `</UserControl>`;
+        fs.writeFileSync(file, text("E2eAccentBrush"));
+        const doc = await vscode.workspace.openTextDocument(file);
+        const ed = await vscode.window.showTextDocument(doc, vscode.ViewColumn.One);
+        try {
+            const keyAt = doc.positionAt(text("E2eAccentBrush").indexOf("E2eAccentBrush") + 3);
+            let targets: vscode.Location[] = [];
+            for (let i = 0; i < 15 && !targets.length; i++) {
+                targets =
+                    (await vscode.commands.executeCommand<vscode.Location[]>("vscode.executeDefinitionProvider", doc.uri, keyAt)) ?? [];
+                if (!targets.length) {
+                    await sleep(1000);
+                }
+            }
+            console.log(
+                `[e2e] resource definition: ${targets.map((t) => `${path.basename(t.uri.fsPath)}:${t.range.start.line + 1}`).join(", ")}`
+            );
+            assert.ok(
+                targets.some((t) => path.basename(t.uri.fsPath) === "E2eResources.axaml" && t.range.start.line === 1),
+                "definition in the other file"
+            );
+
+            const hovers = await vscode.commands.executeCommand<vscode.Hover[]>("vscode.executeHoverProvider", doc.uri, keyAt);
+            const hoverText = hovers
+                .flatMap((h) => h.contents)
+                .map((c) => (typeof c === "string" ? c : c.value))
+                .join(" ");
+            console.log(`[e2e] resource hover: ${hoverText.replace(/\s+/g, " ")}`);
+            assert.ok(hoverText.includes("SolidColorBrush") && hoverText.includes("E2eResources.axaml"), "hover shows the definition");
+
+            await ed.edit((e) => e.replace(new vscode.Range(doc.positionAt(0), doc.positionAt(doc.getText().length)), text("")));
+            const at = doc.positionAt(text("").indexOf("{StaticResource ") + "{StaticResource ".length);
+            const list = await vscode.commands.executeCommand<vscode.CompletionList>("vscode.executeCompletionItemProvider", doc.uri, at);
+            const items = list.items.map((it) => ({
+                label: typeof it.label === "string" ? it.label : it.label.label,
+                detail: it.detail ?? "",
+            }));
+            console.log(
+                `[e2e] resource completion: ${items
+                    .slice(0, 6)
+                    .map((i) => `${i.label} (${i.detail})`)
+                    .join(", ")}`
+            );
+            const labels = items.map((i) => i.label);
+            assert.strictEqual(labels[0], "E2eLocalBrush", "keys of this file first");
+            assert.ok(labels.includes("E2eAccentBrush") && labels.includes("E2eCardRadius"), "keys of the other file");
+            assert.ok(labels.includes("SystemAccentColor"), "theme keys");
+            assert.ok(items.find((i) => i.label === "E2eAccentBrush")!.detail.includes("E2eResources.axaml"));
+        } finally {
+            await vscode.commands.executeCommand("workbench.action.revertAndCloseActiveEditor");
+            fs.rmSync(file, { force: true });
+            fs.rmSync(dictionary, { force: true });
+        }
+    });
+
+    test("quick fix: design-time view model for a view model without a parameterless constructor", async function (this: Mocha.Context) {
+        this.timeout(300000);
+        const vmDir = [path.join(workspace, "ViewModels"), path.join(workspace, path.basename(workspace), "ViewModels")].find((d) =>
+            fs.existsSync(path.join(d, "ViewModelBase.cs"))
+        );
+        if (!vmDir) {
+            console.log("[e2e] skipped: not a C# MVVM project");
+            return;
+        }
+        const ns = /namespace\s+([\w.]+)/.exec(fs.readFileSync(path.join(vmDir, "ViewModelBase.cs"), "utf8"))![1];
+        const vm = path.join(vmDir, "E2eNeedsArgsViewModel.cs");
+        const design = path.join(vmDir, "DesignE2eNeedsArgsViewModel.cs");
+        fs.writeFileSync(
+            vm,
+            `namespace ${ns};\npublic class E2eNeedsArgsViewModel {\n    public E2eNeedsArgsViewModel(string title, int count) { Title = title; }\n    public string Title { get; set; }\n}\n`
+        );
+        const view = path.join(path.dirname(mainWindow), "E2eNeedsArgsView.axaml");
+        fs.writeFileSync(
+            view,
+            `<UserControl xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"\n` +
+                `             xmlns:vm="using:${ns}" x:DataType="vm:E2eNeedsArgsViewModel" Width="300" Height="100">\n` +
+                `    <TextBlock Text="{Binding Title}" />\n` +
+                `</UserControl>`
+        );
+        try {
+            const doc = await vscode.workspace.openTextDocument(view);
+            await vscode.window.showTextDocument(doc, vscode.ViewColumn.One);
+            const line = new vscode.Range(1, 0, 1, 10);
+            let action: vscode.CodeAction | undefined;
+            for (let i = 0; i < 20 && !action; i++) {
+                const actions =
+                    (await vscode.commands.executeCommand<vscode.CodeAction[]>("vscode.executeCodeActionProvider", doc.uri, line)) ?? [];
+                action = actions.find((a) => a.title.startsWith("Create a design-time view model"));
+                if (!action) {
+                    await sleep(1000);
+                }
+            }
+            assert.ok(action?.command, "quick fix not offered");
+            console.log(`[e2e] quick fix: ${action.title}`);
+            await vscode.commands.executeCommand(action.command.command, ...(action.command.arguments ?? []));
+            const generated = fs.readFileSync(design, "utf8");
+            console.log(`[e2e] generated:\n${generated}`);
+            assert.ok(generated.includes("public class DesignE2eNeedsArgsViewModel : E2eNeedsArgsViewModel {"));
+            assert.ok(generated.includes("base(default!, default!)"));
+            assert.ok(doc.getText().includes("<vm:DesignE2eNeedsArgsViewModel />"), "Design.DataContext not added");
+            assert.ok(!doc.isDirty, "view not saved");
+            const s = await waitFor("design data preview", (s) => sizeIs(s, 300, 100) && !s.building && noXamlError(s), 180000);
+            assert.ok(!s.lastXaml?.error, `preview error: ${JSON.stringify(s.lastXaml)}`);
+        } finally {
+            await vscode.commands.executeCommand("workbench.action.closeActiveEditor");
+            for (const f of [view, vm, design]) {
+                fs.rmSync(f, { force: true });
+            }
+            await showMain();
+        }
+    });
+
+    test("outline: element tree with names, keys and selectors", async () => {
+        await showMain();
+        let symbols: vscode.DocumentSymbol[] = [];
+        for (let i = 0; i < 15 && !symbols.length; i++) {
+            symbols =
+                (await vscode.commands.executeCommand<vscode.DocumentSymbol[]>(
+                    "vscode.executeDocumentSymbolProvider",
+                    editor.document.uri
+                )) ?? [];
+            if (!symbols.length) {
+                await sleep(1000);
+            }
+        }
+        const describe = (s: vscode.DocumentSymbol, depth = 0): string[] => [
+            `${"  ".repeat(depth)}${s.name}${s.detail ? ` [${s.detail}]` : ""}`,
+            ...s.children.flatMap((c) => describe(c, depth + 1)),
+        ];
+        const lines = symbols.flatMap((s) => describe(s));
+        console.log(`[e2e] outline:\n${lines.join("\n")}`);
+        assert.strictEqual(symbols.length, 1, "one root element");
+        assert.ok(symbols[0].name.startsWith("Window"), "the root is the Window");
+        assert.ok(symbols[0].children.length > 0, "the root has children");
+        const root = symbols[0];
+        assert.ok(root.range.start.line === 0 && root.range.end.line >= editor.document.lineCount - 2, "the root spans the file");
+    });
+
     test("inlay hints show the type of binding paths", async () => {
         await showMain();
         const text = editor.document.getText();
@@ -969,11 +1312,14 @@ suite("Avalonia previewer (e2e)", () => {
                 editor.document.uri,
                 at
             );
-            const texts = list.items.map(
-                (i) =>
-                    (i.textEdit as vscode.TextEdit | undefined)?.newText ??
-                    (typeof i.insertText === "string" ? i.insertText : (i.insertText?.value ?? ""))
-            );
+            // snippets (axaml.json) are fixed text; the setting is for attribute completion
+            const texts = list.items
+                .filter((i) => i.kind !== vscode.CompletionItemKind.Snippet)
+                .map(
+                    (i) =>
+                        (i.textEdit as vscode.TextEdit | undefined)?.newText ??
+                        (typeof i.insertText === "string" ? i.insertText : (i.insertText?.value ?? ""))
+                );
             const withQuotes = texts.filter((t) => /=['"]/.test(t));
             console.log(`[e2e] attribute completions: ${withQuotes.slice(0, 3).join(" | ")}`);
             assert.ok(withQuotes.length > 0, "no attribute completions");

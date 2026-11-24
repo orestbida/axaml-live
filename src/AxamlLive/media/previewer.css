@@ -237,6 +237,7 @@ button.action.checked {
         linear-gradient(to bottom, var(--vscode-editorIndentGuide-background, rgba(128, 128, 128, 0.15)) 1px, transparent 1px);
 }
 .frame-box {
+    position: relative;
     flex: none;
     margin: auto;
     box-shadow: 0 2px 14px rgba(0, 0, 0, 0.28);
@@ -293,4 +294,27 @@ canvas {
 }
 .xaml-error.show {
     display: block;
+}
+
+/* select mode: the control under the pointer, and the one that was clicked */
+.highlight {
+    display: none;
+    position: absolute;
+    box-sizing: border-box;
+    pointer-events: none;
+    border: 1px solid var(--vscode-focusBorder);
+    background: color-mix(in srgb, var(--vscode-focusBorder) 12%, transparent);
+}
+.highlight.selected {
+    border-width: 2px;
+}
+.highlight span {
+    position: absolute;
+    left: -1px;
+    bottom: 100%;
+    padding: 1px 6px;
+    font-size: 11px;
+    white-space: nowrap;
+    color: var(--vscode-button-foreground);
+    background: var(--vscode-focusBorder);
 }

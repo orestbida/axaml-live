@@ -44,7 +44,7 @@ public sealed class HoverHandler : HoverHandlerBase {
             PropertySymbol p => PropertyHover(p, compilation),
             BindingMemberSymbol b => Code(b.Member.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)) + Docs(b.Member),
             EventHandlerSymbol h => Code($"void {h.ClassFullName}.{h.Method}(object? sender, ...)") + "\n\nEvent handler in the code-behind.",
-            ResourceKeySymbol r => $"Resource `{r.Key}`",
+            ResourceKeySymbol r => ResourceHover(r.Key, text, request.TextDocument.Uri),
             _ => null,
         };
         return markdown == null ? null : new Hover {
@@ -69,7 +69,26 @@ public sealed class HoverHandler : HoverHandlerBase {
         return Code($"{type} {p.Owner.Name}.{p.Name}".Trim()) + $"\n\n*{kind}* of `{p.Owner.FullName}`" + Docs(member);
     }
 
-    static string Code(string s) => $"```csharp\n{s}\n```";
+    /// <summary>The element that defines a resource key: this file, the workspace's other .axaml files, or a theme.</summary>
+    string ResourceHover(string key, string text, DocumentUri uri) {
+        var here = ResourceKeys.In(text).FirstOrDefault(d => d.Key == key);
+        if (here != null) {
+            return Code(here.Source, "xml") + "\n\nResource in this file";
+        }
+
+        var root = _getServer()?.Client.ClientSettings.RootPath ?? _workspace.ProjectInfo?.ProjectDirectory;
+        foreach (var file in AxamlFiles.All(root, _workspace.BufferService, uri)) {
+            var d = ResourceKeys.In(file.Text).FirstOrDefault(d => d.Key == key);
+            if (d != null) {
+                return Code(d.Source, "xml") + $"\n\nResource in {file.Name}";
+            }
+        }
+
+        var theme = ResourceKeys.Theme.FirstOrDefault(t => t.Key == key);
+        return theme.Key != null ? $"Resource `{key}` of the {theme.Theme} theme" : $"Resource `{key}`";
+    }
+
+    static string Code(string s, string language = "csharp") => $"```{language}\n{s}\n```";
 
     static string Docs(ISymbol? symbol) {
         var xml = symbol?.GetDocumentationCommentXml();

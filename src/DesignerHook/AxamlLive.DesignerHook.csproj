@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- loaded into the designer process of any .NET 6+ app (DOTNET_STARTUP_HOOKS); no Avalonia reference -->
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <RootNamespace>AxamlLive.DesignerHook</RootNamespace>
+  </PropertyGroup>
+
+</Project>

@@ -136,6 +136,11 @@
         "icon": "$(play)"
       },
       {
+        "command": "axamlLive.restartLanguageServer",
+        "title": "Restart Language Server",
+        "category": "AXAML Live"
+      },
+      {
         "command": "axamlLive.installTemplates",
         "title": "Install / Update Avalonia Project Templates",
         "category": "AXAML Live"
@@ -375,6 +380,10 @@
       {
         "language": "csharp",
         "path": "./csharp.json"
+      },
+      {
+        "language": "AXAML",
+        "path": "./axaml.json"
       }
     ],
     "configurationDefaults": {

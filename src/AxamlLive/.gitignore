@@ -6,4 +6,5 @@ node_modules
 coverage
 avaloniaServer
 solutionParserTool
+designerHook
 dist

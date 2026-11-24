@@ -29,15 +29,37 @@ public class CompletionHandler : CompletionHandlerBase {
         }
 
         var metadata = await InitializeCompletionEngineAsync(request.TextDocument.Uri);
+        var fullText = _workspace.BufferService.GetText(request.TextDocument.Uri) ?? text;
+        var fullDoc = new XamlDocument(fullText);
+        // "text" joins lines with "\n"; offsets into the document (CRLF files) come from the position
+        int cursor = fullDoc.OffsetOf(request.Position.Line, request.Position.Character);
 
-        var style = StyleCompletion.Complete(text, _workspace.BufferService.GetText(request.TextDocument.Uri) ?? text, metadata,
-            () => OtherAxamlFiles(request.TextDocument.Uri));
+        var style = StyleCompletion.Complete(text, fullText, cursor, metadata,
+            () => AxamlFiles.All(RootPath, _workspace.BufferService, request.TextDocument.Uri));
         if (style != null) {
-            var styleRange = new OmniSharp.Extensions.LanguageServer.Protocol.Models.Range(OffsetToPosition(text, style.Start), request.Position);
-            return new CompletionList(style.Items.Select(i => i with {
-                FilterText = i.Label,
-                TextEdit = new TextEditOrInsertReplaceEdit(new TextEdit { Range = styleRange, NewText = i.Label }),
-            }), isIncomplete: false);
+            return Replacing(style.Items, text, style.Start, request.Position);
+        }
+
+        var bindingPath = BindingPath.Match(text.Length > 2000 ? text[^2000..] : text);
+        if (bindingPath.Success) {
+            var compilation = await _workspace.GetCompilationAsync();
+            var prefix = bindingPath.Groups["path"].Value;
+            var members = new XamlAnalyzer(fullDoc, metadata, compilation).BindingMembersAt(cursor, prefix);
+            if (members != null) {
+                var items = members.Select(m => new CompletionItem {
+                    Label = m.Name,
+                    Kind = CompletionItemKind.Property,
+                    Detail = (m as Microsoft.CodeAnalysis.IPropertySymbol)?.Type.ToDisplayString(Microsoft.CodeAnalysis.SymbolDisplayFormat.MinimallyQualifiedFormat),
+                    SortText = "0" + m.Name,
+                }).ToList();
+                // at the start of the path the engine adds Mode, Converter, ElementName, $parent...
+                if (prefix.Length == 0 && metadata != null && _completionEngine.GetCompletions(metadata, text, text.Length) is { } keywords) {
+                    items.AddRange(keywords.Completions
+                        .Where(k => !items.Any(i => i.Label == k.DisplayText) && !string.IsNullOrWhiteSpace(k.DisplayText) && !k.DisplayText.Contains('`'))
+                        .Select(k => new CompletionItem { Label = k.DisplayText, Detail = k.Description, Kind = GetCompletionItemKind(k.Kind), SortText = "1" + k.DisplayText }));
+                }
+                return Replacing(items, text, text.Length - bindingPath.Groups["w"].Value.Length, request.Position);
+            }
         }
 
         if (metadata == null) {
@@ -59,7 +81,7 @@ public class CompletionHandler : CompletionHandlerBase {
         var range = set == null ? null : new OmniSharp.Extensions.LanguageServer.Protocol.Models.Range(OffsetToPosition(text, set.StartPosition), request.Position);
 
         var completions = set?.Completions
-            .Where(p => !p.DisplayText.Contains('`'))
+            .Where(p => !string.IsNullOrWhiteSpace(p.DisplayText) && !p.DisplayText.Contains('`'))
             .Select(p => new CompletionItem {
                 Label = p.DisplayText,
                 Detail = p.Description,
@@ -106,55 +128,21 @@ public class CompletionHandler : CompletionHandlerBase {
         _completionEngine = new CompletionEngine();
     }
 
-    readonly Dictionary<string, (DateTime Stamp, string Text)> _axamlCache = new(StringComparer.OrdinalIgnoreCase);
+    /// <summary>The path typed so far in {Binding ...}, {CompiledBinding ...} or Path=, and the member being typed.</summary>
+    static readonly System.Text.RegularExpressions.Regex BindingPath = new(
+        @"\{\s*(?:Binding|CompiledBinding|x:Bind)\s+(?:Path\s*=\s*)?(?<path>(?:[A-Za-z_]\w*\.)*)(?<w>[A-Za-z_]\w*)?$",
+        System.Text.RegularExpressions.RegexOptions.Compiled);
 
-    /// <summary>The other .axaml files of the workspace (open editors first), for style classes defined there.</summary>
-    IEnumerable<(string Name, string Text)> OtherAxamlFiles(DocumentUri current) {
-        var root = _getServer()?.Client.ClientSettings.RootPath ?? _workspace.ProjectInfo?.ProjectDirectory;
-        if (root == null || !Directory.Exists(root)) {
-            yield break;
-        }
-
-        var currentPath = Utilities.Utils.FromUri(current);
-        IEnumerable<string> files;
-        try {
-            files = Directory.EnumerateFiles(root, "*.axaml", SearchOption.AllDirectories)
-                .Where(f => !f.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}") && !f.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}"))
-                .Take(500).ToList();
-        } catch (Exception) {
-            yield break;
-        }
-
-        foreach (var file in files) {
-            var uri = DocumentUri.FromFileSystemPath(file);
-            if (uri == current || string.Equals(Path.GetFullPath(file), Path.GetFullPath(currentPath), StringComparison.OrdinalIgnoreCase)) {
-                continue;
-            }
-
-            var open = _workspace.BufferService.GetText(uri);
-            if (open != null) {
-                yield return (Path.GetFileName(file), open);
-                continue;
-            }
-
-            string? text = null;
-            try {
-                var stamp = File.GetLastWriteTimeUtc(file);
-                if (!_axamlCache.TryGetValue(file, out var cached) || cached.Stamp != stamp) {
-                    cached = (stamp, File.ReadAllText(file));
-                    _axamlCache[file] = cached;
-                }
-
-                text = cached.Text;
-            } catch (IOException) {
-                // being written: skipped this time
-            }
-
-            if (text != null) {
-                yield return (Path.GetFileName(file), text);
-            }
-        }
+    /// <summary>Items that replace the text from <paramref name="start"/> (an offset into the text before the cursor).</summary>
+    static CompletionList Replacing(IEnumerable<CompletionItem> items, string text, int start, Position cursor) {
+        var range = new OmniSharp.Extensions.LanguageServer.Protocol.Models.Range(OffsetToPosition(text, start), cursor);
+        return new CompletionList(items.Select(i => i with {
+            FilterText = i.Label,
+            TextEdit = new TextEditOrInsertReplaceEdit(new TextEdit { Range = range, NewText = i.InsertText ?? i.Label }),
+        }), isIncomplete: false);
     }
+
+    string? RootPath => _getServer()?.Client.ClientSettings.RootPath ?? _workspace.ProjectInfo?.ProjectDirectory;
 
     static Position OffsetToPosition(string text, int offset) {
         offset = Math.Clamp(offset, 0, text.Length);

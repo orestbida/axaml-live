@@ -89,12 +89,48 @@ export async function activate(context: vscode.ExtensionContext) {
         .then(() => vscode.workspace.textDocuments.forEach(adoptXaml))
         .catch((e) => logger.error(`Failed to parse solution: ${e}`));
 
+    // language server state in the status bar ({} next to the language), click to restart
+    const status = vscode.languages.createLanguageStatusItem("axamlLive.languageServer", { language: "AXAML" });
+    status.name = "AXAML Live language server";
+    status.command = { title: "Restart", command: "axamlLive.restartLanguageServer" };
+    const showState = (state: lsp.State | "failed") => {
+        status.busy = state === lsp.State.Starting;
+        status.severity =
+            state === "failed" || state === lsp.State.Stopped
+                ? vscode.LanguageStatusSeverity.Error
+                : vscode.LanguageStatusSeverity.Information;
+        status.text =
+            state === lsp.State.Running
+                ? "AXAML Live: ready"
+                : state === lsp.State.Starting
+                  ? "AXAML Live: starting"
+                  : "AXAML Live: stopped";
+        status.detail = state === lsp.State.Running ? "completion, hints and diagnostics" : "completion and diagnostics are off";
+    };
+    showState(lsp.State.Starting);
+    context.subscriptions.push(
+        status,
+        vscode.commands.registerCommand("axamlLive.restartLanguageServer", async () => {
+            if (!languageClient) {
+                return;
+            }
+            logger.appendLine("Restarting the language server...");
+            await languageClient.restart().catch((e) => {
+                logger.error(`Failed to restart the language server: ${e}`);
+                showState("failed");
+            });
+        })
+    );
+
     try {
         languageClient = await createLanguageService(context);
+        context.subscriptions.push(languageClient.onDidChangeState((e) => showState(e.newState)));
         logger.appendLine("Starting Avalonia Language Server...");
         await languageClient.start();
+        showState(languageClient.state);
     } catch (error) {
         logger.appendLine(`Failed to start Avalonia Language Server. ${error}`);
+        showState("failed");
     }
 }
 

@@ -13,6 +13,10 @@ public sealed class XamlElement {
     public List<XamlAttribute> Attributes { get; } = new();
     public required Dictionary<string, string> Namespaces { get; init; } // prefix -> uri in scope ("" = default)
     public bool IsPropertyElement => LocalName.Contains('.');
+    /// <summary>Offset of the "&lt;" of the start tag.</summary>
+    public int Start { get; init; }
+    /// <summary>Offset after the "&gt;" of the end tag (or of "/&gt;"); the end of the text when not closed.</summary>
+    public int End { get; set; }
 }
 
 public sealed class XamlAttribute {
@@ -81,7 +85,9 @@ public sealed class XamlDocument {
             while (reader.Read()) {
                 if (reader.NodeType == XmlNodeType.EndElement) {
                     if (stack.Count > 0) {
-                        stack.Pop();
+                        var closed = stack.Pop();
+                        int close = Text.IndexOf('>', OffsetOf(info.LineNumber - 1, info.LinePosition - 1));
+                        closed.End = close < 0 ? Text.Length : close + 1;
                     }
 
                     continue;
@@ -103,6 +109,8 @@ public sealed class XamlDocument {
                     NameRange = RangeOf(localOffset, reader.LocalName.Length),
                     Parent = parent,
                     Namespaces = ns,
+                    Start = Math.Max(0, nameOffset - 1),
+                    End = Text.Length,
                 };
 
                 bool empty = reader.IsEmptyElement;
@@ -148,6 +156,11 @@ public sealed class XamlDocument {
                 Elements.Add(element);
                 if (!empty) {
                     stack.Push(element);
+                } else {
+                    // after the last attribute value (a value may contain ">")
+                    int from = element.Attributes.Count > 0 ? element.Attributes.Max(a => OffsetOf(a.ValueRange.End.Line, a.ValueRange.End.Character)) : localOffset;
+                    int close = Text.IndexOf('>', Math.Min(from, Text.Length));
+                    element.End = close < 0 ? Text.Length : close + 1;
                 }
             }
         } catch (XmlException e) {

@@ -60,6 +60,7 @@ jobs:
         run: |
           dotnet build AvaloniaLSP/AvaloniaLanguageServer/AvaloniaLanguageServer.csproj -c Release --output AxamlLive/avaloniaServer
           dotnet build SolutionParser/SolutionParser.csproj -c Release --output AxamlLive/solutionParserTool
+          dotnet build DesignerHook/AxamlLive.DesignerHook.csproj -c Release --output AxamlLive/designerHook
 
       - name: Package VSIX
         if: matrix.os == 'ubuntu-latest'

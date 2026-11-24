@@ -30,6 +30,7 @@ public class Program {
             .WithHandler<CodeActionHandler>()
             .WithHandler<WatchedFilesHandler>()
             .WithHandler<InlayHintHandler>()
+            .WithHandler<DocumentSymbolHandler>()
             .WithServices(ConfigureServices)
             .OnInitialize((init_server, request, token) => {
                 server = init_server;

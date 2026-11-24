@@ -186,7 +186,7 @@ suite("design data hint", () => {
     test("names a view model without a parameterless constructor", () => {
         assert.strictEqual(
             designDataHint("Unable to find public constructor for type Dash:Dash.ViewModels.SettingsViewModel() Line 2, position 83."),
-            "no design data: SettingsViewModel has no parameterless constructor (add one for design time, or Design.DataContext)"
+            "no design data: SettingsViewModel has no parameterless constructor (quick fix on x:DataType: create a design-time view model)"
         );
     });
 

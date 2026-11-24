@@ -16,6 +16,33 @@ import { designTimeConfigProperties } from "./runtimeConfig";
 
 export type SessionState = "starting" | "ready" | "exited";
 
+/** One element on the path from the top-level to the control under the pointer (src/DesignerHook). */
+export interface InspectedElement {
+    type: string;
+    index: number;
+    x?: number;
+    y?: number;
+    width?: number;
+    height?: number;
+}
+
+export interface InspectMessage {
+    kind: "ready" | "hover" | "select" | "error";
+    path?: InspectedElement[];
+    message?: string;
+}
+
+/** Environment that loads the select-mode helper into the designer process (.NET startup hook). */
+function designerHookEnv(): NodeJS.ProcessEnv {
+    const dir = vscode.extensions.getExtension(AppConstants.extensionId)?.extensionPath;
+    const hook = dir ? path.join(dir, "designerHook", "AxamlLive.DesignerHook.dll") : undefined;
+    if (!hook || !fs.existsSync(hook)) {
+        return process.env;
+    }
+    const existing = process.env.DOTNET_STARTUP_HOOKS;
+    return { ...process.env, AXAML_LIVE_DESIGNER_HOOK: "1", DOTNET_STARTUP_HOOKS: existing ? existing + path.delimiter + hook : hook };
+}
+
 export { XamlResult } from "./xamlError";
 
 /** A rendered frame from the designer (RGBA8888). scale = render DPI / 96. */
@@ -49,6 +76,9 @@ export class PreviewSession implements vscode.Disposable {
     public readonly onDidChangeState = this._onDidChangeState.event;
     private readonly _onXamlResult = new vscode.EventEmitter<XamlResult>();
     public readonly onXamlResult = this._onXamlResult.event;
+    private readonly _onInspect = new vscode.EventEmitter<InspectMessage>();
+    /** Select mode: the control under the pointer, reported by the designer hook. */
+    public readonly onInspect = this._onInspect.event;
     private readonly _onFrame = new vscode.EventEmitter<PreviewFrame>();
     public readonly onFrame = this._onFrame.event;
     private readonly _limiter: FrameRateLimiter;
@@ -135,11 +165,23 @@ export class PreviewSession implements vscode.Disposable {
         }
 
         logger.info(`Starting previewer for ${p.name}: dotnet ${args.join(" ")}`);
-        const proc = spawn("dotnet", args, { env: process.env, cwd: this._shadowDir ?? outputDir });
+        const proc = spawn("dotnet", args, { env: designerHookEnv(), cwd: this._shadowDir ?? outputDir });
         this._process = proc;
 
         const collect = (data: Buffer) => {
             for (const line of data.toString().split(/\r?\n/)) {
+                if (line.startsWith("AXAML_LIVE ")) {
+                    try {
+                        const msg = JSON.parse(line.substring("AXAML_LIVE ".length)) as InspectMessage;
+                        if (msg.kind !== "hover") {
+                            logger.appendLine(`[previewer] ${line}`);
+                        }
+                        this._onInspect.fire(msg);
+                    } catch {
+                        logger.appendLine(`[previewer] unreadable: ${line}`);
+                    }
+                    continue;
+                }
                 if (line.trim()) {
                     this._log.push(line);
                     logger.appendLine(`[previewer] ${line}`);
@@ -446,6 +488,7 @@ export class PreviewSession implements vscode.Disposable {
             removeShadow();
         }
         this._onDidChangeState.dispose();
+        this._onInspect.dispose();
         this._onXamlResult.dispose();
         this.cancelPendingAcks();
         this._onFrame.dispose();

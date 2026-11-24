@@ -226,6 +226,42 @@ public sealed class XamlAnalyzer {
         return hints;
     }
 
+    /// <summary>
+    /// Members to complete in a binding path at <paramref name="offset"/>: those of the type that
+    /// <paramref name="pathPrefix"/> ("Customer.Address.") leads to from the data type in scope (x:DataType,
+    /// also of data templates). Null when the data type is not known.
+    /// </summary>
+    public List<ISymbol>? BindingMembersAt(int offset, string pathPrefix) {
+        if (_compilation == null) {
+            return null;
+        }
+        // the element whose start tag holds the cursor; while its tag cannot be parsed yet, the closest one before
+        var el = _doc.Elements.Where(e => e.Start <= offset && offset < e.End).OrderByDescending(e => e.Start).FirstOrDefault()
+            ?? _doc.Elements.LastOrDefault(e => e.Start < offset);
+        if (el == null || DataTypeOf(el) is not { } dataType) {
+            return null;
+        }
+
+        var current = _compilation.GetTypeByMetadataName(dataType);
+        foreach (var segment in pathPrefix.Split('.', StringSplitOptions.RemoveEmptyEntries)) {
+            current = current == null ? null : FindMember(current, segment) switch {
+                IPropertySymbol p => p.Type as INamedTypeSymbol,
+                IFieldSymbol f => f.Type as INamedTypeSymbol,
+                _ => null,
+            };
+        }
+
+        if (current == null) {
+            return null;
+        }
+
+        return AllMembers(current)
+            .Where(m => m is IPropertySymbol { IsStatic: false, IsIndexer: false, DeclaredAccessibility: Accessibility.Public })
+            .GroupBy(m => m.Name).Select(g => g.First())
+            .OrderBy(m => m.Name)
+            .ToList();
+    }
+
     /// <summary>Index of the brace that closes the markup extension starting at the first character, or -1.</summary>
     static int ClosingBrace(string value) {
         int depth = 0;

@@ -5,7 +5,8 @@ namespace AvaloniaLanguageServer.Services;
 
 /// <summary>
 /// Completion the vendored engine does not offer: style classes (Selector ".name", Classes="..."), element names
-/// (Selector "#name") and control types after "/template/" in a selector.
+/// (Selector "#name"), control types after "/template/" in a selector, and resource keys of the project's files
+/// ({StaticResource key}, {DynamicResource key}).
 /// </summary>
 public static class StyleCompletion {
     public sealed record Result(int Start, List<CompletionItem> Items);
@@ -23,9 +24,10 @@ public static class StyleCompletion {
 
     /// <summary>
     /// Returns completions when the cursor is in one of the handled places, otherwise null (the engine handles it).
-    /// <paramref name="otherFiles"/> are the other .axaml files of the project, for classes defined there.
+    /// <paramref name="fullTextCursor"/> is the cursor offset in <paramref name="fullText"/> (which may use CRLF);
+    /// <paramref name="otherFiles"/> are the other .axaml files of the project, for classes and keys defined there.
     /// </summary>
-    public static Result? Complete(string textToCursor, string fullText, Metadata? metadata, Func<IEnumerable<(string Name, string Text)>> otherFiles) {
+    public static Result? Complete(string textToCursor, string fullText, int fullTextCursor, Metadata? metadata, Func<IEnumerable<AxamlFiles.File>> otherFiles) {
         var tail = textToCursor.Length > 4000 ? textToCursor[^4000..] : textToCursor;
         var open = OpenValue.Match(tail);
         if (!open.Success) {
@@ -35,10 +37,15 @@ public static class StyleCompletion {
         var attribute = open.Groups["name"].Value;
         var value = open.Groups["value"].Value;
         int cursor = textToCursor.Length;
-        // the word being typed is not a suggestion: leave it out of the text that classes are read from
-        var typedWord = Regex.Match(value, @"[\w-]*$").Value;
-        if (typedWord.Length > 0 && fullText.Length >= cursor) {
-            fullText = fullText.Remove(cursor - typedWord.Length, typedWord.Length);
+        // the word being typed is not a suggestion: leave it out of the text that classes and keys are read from
+        var typedWord = Regex.Match(value, @"[\w.:-]*$").Value;
+        if (typedWord.Length > 0 && fullTextCursor >= typedWord.Length && fullTextCursor <= fullText.Length) {
+            fullText = fullText.Remove(fullTextCursor - typedWord.Length, typedWord.Length);
+        }
+
+        var resource = Regex.Match(value, @"\{\s*(?:StaticResource|DynamicResource)\s+(?:ResourceKey\s*=\s*)?(?<w>[\w.:-]*)$");
+        if (resource.Success) {
+            return new Result(cursor - resource.Groups["w"].Value.Length, ResourceItems(fullText, otherFiles));
         }
 
         if (attribute == "Selector") {
@@ -78,15 +85,15 @@ public static class StyleCompletion {
         return null;
     }
 
-    static List<CompletionItem> ClassItems(string fullText, Func<IEnumerable<(string Name, string Text)>> otherFiles, string[] exclude) {
+    static List<CompletionItem> ClassItems(string fullText, Func<IEnumerable<AxamlFiles.File>> otherFiles, string[] exclude) {
         var found = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var name in ClassesIn(fullText)) {
             found.TryAdd(name, "style class in this file");
         }
 
-        foreach (var (file, text) in otherFiles()) {
-            foreach (var name in ClassesIn(text)) {
-                found.TryAdd(name, $"style class in {file}");
+        foreach (var file in otherFiles()) {
+            foreach (var name in ClassesIn(file.Text)) {
+                found.TryAdd(name, $"style class in {file.Name}");
             }
         }
 
@@ -101,6 +108,34 @@ public static class StyleCompletion {
                 Label = kv.Key,
                 Kind = CompletionItemKind.EnumMember,
                 Detail = kv.Value,
+                SortText = i.ToString("D4"),
+            })
+            .ToList();
+    }
+
+    static List<CompletionItem> ResourceItems(string fullText, Func<IEnumerable<AxamlFiles.File>> otherFiles) {
+        var found = new Dictionary<string, (string Detail, string? Source, int Rank)>(StringComparer.Ordinal);
+        foreach (var d in ResourceKeys.In(fullText)) {
+            found.TryAdd(d.Key, ($"{d.Type} in this file", d.Source, 0));
+        }
+
+        foreach (var file in otherFiles()) {
+            foreach (var d in ResourceKeys.In(file.Text)) {
+                found.TryAdd(d.Key, ($"{d.Type} in {file.Name}", d.Source, 1));
+            }
+        }
+
+        foreach (var (key, theme) in ResourceKeys.Theme) {
+            found.TryAdd(key, ($"{theme} theme resource", null, 2));
+        }
+
+        return found
+            .OrderBy(kv => kv.Value.Rank).ThenBy(kv => kv.Key)
+            .Select((kv, i) => new CompletionItem {
+                Label = kv.Key,
+                Kind = CompletionItemKind.Constant,
+                Detail = kv.Value.Detail,
+                Documentation = kv.Value.Source == null ? null : new StringOrMarkupContent(new MarkupContent { Kind = MarkupKind.Markdown, Value = $"```xml\n{kv.Value.Source}\n```" }),
                 SortText = i.ToString("D4"),
             })
             .ToList();

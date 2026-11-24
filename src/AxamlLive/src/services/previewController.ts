@@ -6,7 +6,7 @@ import { spawn } from "child_process";
 
 import * as sm from "../models/solutionModel";
 import * as sln from "./solutionParser";
-import { PreviewSession, PreviewFrame, canStartPreviewer, isSameProject, XamlResult } from "./previewSession";
+import { PreviewSession, PreviewFrame, canStartPreviewer, isSameProject, XamlResult, InspectMessage } from "./previewSession";
 import { PanelOptions, WebPreviewerPanel } from "../panels/WebPreviwerPanel";
 import { AppConstants, isAvaloniaFile, logger, samePath } from "../util/Utilities";
 import { Messages, mapKey } from "./messageParser";
@@ -19,8 +19,10 @@ import {
     applyPreviewBackground,
     applyThemeVariant,
     designDataHint,
+    themeWrapperDepth,
 } from "../xaml/designTransforms";
 import { formFactors, resolveFormFactor } from "../xaml/formFactors";
+import { findElementByPath } from "../xaml/inspect";
 
 interface ViewInfo {
     zoom: number;
@@ -300,7 +302,8 @@ export class PreviewController implements vscode.Disposable {
     }
 
     private forwardInput(msg: any) {
-        if (!this._inputEnabled || !this._session) {
+        // select mode input is handled by the designer hook, not passed to the app
+        if ((!this._inputEnabled && !msg.select) || !this._session) {
             return;
         }
         const mods: number[] = Array.isArray(msg.modifiers) ? msg.modifiers : [];
@@ -469,6 +472,7 @@ export class PreviewController implements vscode.Disposable {
             }
         });
         session.onXamlResult((r) => this.onXamlResult(r));
+        session.onInspect((m) => this._session === session && this.onInspect(m));
 
         try {
             await session.start();
@@ -541,7 +545,11 @@ export class PreviewController implements vscode.Disposable {
                 ? applyDesignDataContext(text)
                 : text;
         this._pushedDesignDataContext = withDataContext !== text;
-        text = applyThemeVariant(applyPreviewBackground(withDataContext, this.config.get<string>("background", "theme")), this._theme);
+        // select mode maps the designer's logical tree back to this text; the theme wrappers are not in it
+        this._inspected = { file, text, version: doc?.version };
+        const withBackground = applyPreviewBackground(withDataContext, this.config.get<string>("background", "theme"));
+        this._wrapperDepth = themeWrapperDepth(withBackground, this._theme);
+        text = applyThemeVariant(withBackground, this._theme);
         const size = resolveFormFactor(this._formFactor, this._rotated);
         if (size) {
             text = applyDesignSize(text, size.width, size.height);
@@ -774,8 +782,63 @@ export class PreviewController implements vscode.Disposable {
     }
 
     /** Internal state for diagnostics and end-to-end tests (command axamlLive.debug.state). */
+    private _lastInspect: InspectMessage | undefined;
+    private _lastHighlight: string | undefined;
+    /** The file text of the last update (before preview transforms) and the theme wrappers added to it. */
+    private _inspected: { file: vscode.Uri; text: string; version?: number } | undefined;
+    private _wrapperDepth = 0;
+
+    /** Select mode: highlight the control under the pointer; on click select its element in the editor. */
+    private async onInspect(msg: InspectMessage) {
+        this._lastInspect = msg;
+        if ((msg.kind !== "hover" && msg.kind !== "select") || !msg.path || !this._inspected) {
+            return;
+        }
+        const { file, text } = this._inspected;
+        const found = findElementByPath(text, msg.path, this._wrapperDepth);
+        if (!found) {
+            this._panel?.setHighlight(undefined);
+            return;
+        }
+        const el = found.element;
+        const step = msg.path[found.pathIndex];
+        const name = el.attributes.find((a) => a.name === "x:Name" || a.name === "Name")?.value;
+        const label = name ? `${el.name} ${name}` : el.name;
+        this._lastHighlight = label;
+        if (step.width !== undefined && step.height !== undefined) {
+            this._panel?.setHighlight({
+                x: step.x ?? 0,
+                y: step.y ?? 0,
+                width: step.width,
+                height: step.height,
+                label,
+                selected: msg.kind === "select",
+            });
+        }
+        if (msg.kind !== "select") {
+            return;
+        }
+        const doc = await vscode.workspace.openTextDocument(file);
+        if (doc.getText() !== text) {
+            return; // edited since this preview: the offsets no longer fit
+        }
+        const visible = vscode.window.visibleTextEditors.find((e) => samePath(e.document.uri.fsPath, file.fsPath));
+        const selection = new vscode.Selection(doc.positionAt(el.start + 1), doc.positionAt(el.nameEnd));
+        const editor = await vscode.window.showTextDocument(doc, {
+            viewColumn: visible?.viewColumn ?? vscode.ViewColumn.One,
+            selection,
+            preserveFocus: true,
+        });
+        editor.revealRange(
+            new vscode.Range(doc.positionAt(el.start), doc.positionAt(el.startTagEnd)),
+            vscode.TextEditorRevealType.InCenterIfOutsideViewport
+        );
+    }
+
     public getDebugState() {
         return {
+            lastInspect: this._lastInspect,
+            lastHighlight: this._lastHighlight,
             panel: !!this._panel,
             file: this._file?.fsPath,
             panelState: this._panel?.state,

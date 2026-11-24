@@ -1,7 +1,12 @@
 import * as vscode from "vscode";
 import { CommandManager } from "../commandManager";
 import { RestartPreviewerCommand, ShowPreviewToSideCommand } from "./ShowPreviewToSideCommand";
-import { CreatePreviewerAssets, SelectPreviewerHostCommand, SelectSolutionCommand } from "./createPreviewerAssets";
+import {
+    CreateDesignViewModelCommand,
+    CreatePreviewerAssets,
+    SelectPreviewerHostCommand,
+    SelectSolutionCommand,
+} from "./createPreviewerAssets";
 import { CreateNewProject } from "./createNewProject";
 import { NewItemCommand } from "./newItem";
 import { InstallTemplatesCommand, RunAppCommand, RunProjectCommand, ShowCodeBehindCommand, ShowViewModelCommand } from "./editorCommands";
@@ -18,6 +23,7 @@ export function registerAvaloniaCommands(commandManager: CommandManager, control
     commandManager.register(new ShowPreviewToSideCommand(controller));
     commandManager.register(new RestartPreviewerCommand(controller));
     commandManager.register(new CreatePreviewerAssets(controller));
+    commandManager.register(new CreateDesignViewModelCommand(controller));
     commandManager.register(new SelectSolutionCommand(controller));
     commandManager.register(new SelectPreviewerHostCommand(controller));
     return commandManager;

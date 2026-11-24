@@ -221,6 +221,7 @@
         }
         refreshDropdowns();
         reportView(stageW, stageH);
+        renderHighlight();
     }
 
     /** Tells the extension the effective zoom and the render scale needed for a sharp image. */
@@ -269,7 +270,39 @@
         }
     }
 
+    // select mode: pointer input goes to the designer hook (marked with Alt+Control+Shift+Windows), not to the app
+    let selectMode = false;
+    let highlight = null; // { x, y, width, height, label, selected } in logical coordinates
+    function renderHighlight() {
+        const highlightBox = $("highlight");
+        const r = selectMode ? highlight : null;
+        highlightBox.style.display = r ? "block" : "none";
+        if (r) {
+            highlightBox.style.left = r.x * zoom + "px";
+            highlightBox.style.top = r.y * zoom + "px";
+            highlightBox.style.width = r.width * zoom + "px";
+            highlightBox.style.height = r.height * zoom + "px";
+            highlightBox.classList.toggle("selected", !!r.selected);
+            $("highlightLabel").textContent = r.label;
+        }
+    }
+    function setSelectMode(on) {
+        selectMode = on;
+        $("selectElement").classList.toggle("checked", on);
+        $("selectElement").setAttribute("aria-pressed", String(on));
+        canvas.style.cursor = on ? "crosshair" : options.inputEnabled ? "default" : "not-allowed";
+        if (!on) {
+            highlight = null;
+        }
+        renderHighlight();
+    }
+    $("selectElement").onclick = () => setSelectMode(!selectMode);
+    const forwarding = () => options.inputEnabled || selectMode;
+
     function modifiers(e) {
+        if (selectMode) {
+            return [0, 1, 2, 3, ...(e.buttons & 1 ? [4] : [])];
+        }
         const m = [];
         if (e.altKey) {
             m.push(0);
@@ -298,11 +331,11 @@
     const button = (e) => (e.button === 0 ? 1 : e.button === 2 ? 2 : e.button === 1 ? 3 : 0);
     let pendingMove = null;
     canvas.addEventListener("pointermove", (e) => {
-        if (!options.inputEnabled) {
+        if (!forwarding()) {
             return;
         }
         const first = !pendingMove;
-        pendingMove = { type: "input", kind: "pointerMoved", ...pos(e), modifiers: modifiers(e) };
+        pendingMove = { type: "input", kind: "pointerMoved", ...pos(e), modifiers: modifiers(e), select: selectMode };
         if (first) {
             requestAnimationFrame(() => {
                 send(pendingMove);
@@ -311,18 +344,24 @@
         }
     });
     canvas.addEventListener("pointerdown", (e) => {
-        if (!options.inputEnabled) {
+        if (!forwarding()) {
             return;
         }
         canvas.focus();
         canvas.setPointerCapture(e.pointerId);
-        send({ type: "input", kind: "pointerPressed", ...pos(e), button: button(e), modifiers: modifiers(e) });
+        send({ type: "input", kind: "pointerPressed", ...pos(e), button: button(e), modifiers: modifiers(e), select: selectMode });
     });
     canvas.addEventListener("pointerup", (e) => {
-        if (!options.inputEnabled) {
+        if (!forwarding()) {
             return;
         }
-        send({ type: "input", kind: "pointerReleased", ...pos(e), button: button(e), modifiers: modifiers(e) });
+        send({ type: "input", kind: "pointerReleased", ...pos(e), button: button(e), modifiers: modifiers(e), select: selectMode });
+    });
+    canvas.addEventListener("pointerleave", () => {
+        if (selectMode && highlight && !highlight.selected) {
+            highlight = null;
+            renderHighlight();
+        }
     });
     canvas.addEventListener("contextmenu", (e) => options.inputEnabled && e.preventDefault());
     canvas.addEventListener(
@@ -337,6 +376,12 @@
         { passive: false }
     );
     canvas.addEventListener("keydown", (e) => {
+        if (selectMode) {
+            if (e.key === "Escape") {
+                setSelectMode(false);
+            }
+            return;
+        }
         if (!options.inputEnabled) {
             return;
         }
@@ -347,7 +392,7 @@
         }
     });
     canvas.addEventListener("keyup", (e) => {
-        if (!options.inputEnabled) {
+        if (!options.inputEnabled || selectMode) {
             return;
         }
         e.preventDefault();
@@ -387,6 +432,10 @@
             case "setZoom":
                 setZoom(msg.zoom);
                 break;
+            case "highlight":
+                highlight = msg.rect || null;
+                renderHighlight();
+                break;
             case "options":
                 options = msg.options;
                 $("theme").value = options.theme;
@@ -396,7 +445,7 @@
                 $("input").classList.toggle("checked", options.inputEnabled);
                 $("input").setAttribute("aria-pressed", String(options.inputEnabled));
                 frameBox.classList.toggle("device", options.formFactor !== "default");
-                canvas.style.cursor = options.inputEnabled ? "default" : "not-allowed";
+                canvas.style.cursor = selectMode ? "crosshair" : options.inputEnabled ? "default" : "not-allowed";
                 lastView = "";
                 layout();
                 break;
