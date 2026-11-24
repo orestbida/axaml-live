@@ -2,6 +2,24 @@
 
 All notable changes to AXAML Live are documented in this file.
 
+## [0.3.0] - 24 November 2026
+
+- Custom size: choose Custom in the size menu, then type the width and height or drag the frame's right edge, bottom
+  edge or corner to see how a view behaves when its window is resized. The size is remembered.
+- Rulers along the top and left edges of the preview (ruler button in the toolbar), in the view's pixels with 0 at the
+  frame's corner; they follow zoom and scrolling and mark the pointer's position.
+- Select mode works inside views the file uses (a UserControl used in the file, or one created by a data template):
+  the element is highlighted and selected in that view's own .axaml, while the preview stays on the file.
+- The size menu offers the design size, Desktop (1920x1080), Phone, Tablet and Custom, each with its size.
+- Device sizes have square corners, so every pixel of the view is shown.
+- Toolbar: the select button uses the inspect icon and the input toggle a keyboard icon; the rotate button is gone
+  (`axamlLive.previewer.defaultFormFactorRotated` still shows devices in landscape).
+- Fixed: typing text into the previewed UI made the designer drop the connection (wrong message id).
+- Fixed: switching files right after a restart or build could leave the new view blank; the preview now sends one
+  update at a time.
+- The status shows only "no design data"; the reason is in its tooltip. The select label stays inside the frame at
+  its edges.
+
 ## [0.2.2] - 24 November 2026
 
 - The preview handles file switches, edits, builds and restarts one at a time, so quick switches no longer start the
