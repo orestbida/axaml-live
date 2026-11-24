@@ -27,6 +27,10 @@ function prepareUserSettings(userDataDir: string) {
     }
     settings["window.newWindowDimensions"] = process.env.E2E_MAXIMIZED === "0" ? "default" : "maximized";
     delete settings["axamlLive.previewer.defaultZoom"]; // left over by an interrupted run: previews start at 100%
+    // an installed copy of the extension (from the Marketplace) must not be updated during a run: the update restarts
+    // the extension host, which ends the run
+    settings["extensions.autoUpdate"] = false;
+    settings["extensions.autoCheckUpdates"] = false;
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.writeFileSync(file, JSON.stringify(settings, null, 2));
 }

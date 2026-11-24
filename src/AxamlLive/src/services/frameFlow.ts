@@ -36,8 +36,15 @@ export interface FlowOutput<F> {
  * - on success, a held frame #1 is the new window's first frame (shown); any other held frame belongs to the closed
  *   window (dropped);
  * - on failure there is no new window: the previous one stays current and gets its held frame or the cancelled
- *   acknowledgement, or it would never render again.
+ *   acknowledgement, or it would never render again;
+ * - only one update is in flight (see update()): with two, a held frame #1 can be the in-between window's, and
+ *   acknowledging it blocks the newest window, which then never renders.
  */
+/** An update the designer has not answered for this long no longer holds up the next one (it may never answer). */
+const unansweredAfterMs = 10000;
+/** How long a waiting update waits for the first frame of the window before it (a view may not paint at all). */
+const firstFrameWaitMs = 1000;
+
 export class FrameFlow<F extends { sequenceId: number }> {
     private readonly _limiter: FrameRateLimiter;
     private _pendingUpdates = 0;
@@ -63,8 +70,45 @@ export class FrameFlow<F extends { sequenceId: number }> {
         this._limiter.setFps(fps);
     }
 
+    /**
+     * Sends an update now, or once the window of the update in flight is settled: the designer answered it and, on
+     * success, its first frame arrived and was acknowledged (a new window sends frame #1 unasked; if it arrived after
+     * the next update, it could not be told apart from the next window's frame #1). Of the updates waiting meanwhile only
+     * the newest is sent. An update that got no answer for a while does not hold up the next one.
+     */
+    public update(send: () => void) {
+        const busy = this._pendingUpdates > 0 || this._firstFrameTimer !== undefined;
+        if (busy && this._clock.now() - this._sentAt < unansweredAfterMs) {
+            this._out.log(this._queued ? "update queued (replaces the waiting one)" : "update queued");
+            this._queued = send;
+            return;
+        }
+        this.updateSent();
+        send();
+    }
+
+    private _queued: (() => void) | undefined;
+    private _sentAt = 0;
+    /** Set while a new window's first frame is awaited before a waiting update is sent. */
+    private _firstFrameTimer: unknown;
+
+    private sendQueued() {
+        if (this._firstFrameTimer !== undefined) {
+            this._clock.clearTimeout(this._firstFrameTimer);
+            this._firstFrameTimer = undefined;
+        }
+        const queued = this._queued;
+        if (!queued || this._disposed) {
+            return;
+        }
+        this._queued = undefined;
+        this.updateSent();
+        queued();
+    }
+
     /** An UpdateXaml message was sent: the designer will open a new window. */
     public updateSent() {
+        this._sentAt = this._clock.now();
         if (this._ackTimers.size) {
             this._ackCancelled = true;
         }
@@ -95,6 +139,17 @@ export class FrameFlow<F extends { sequenceId: number }> {
             this.accept(held);
         }
         this._ackCancelled = false;
+
+        if (failed || (held && held.sequenceId === 1)) {
+            // no new window, or its first frame is here: settled
+            this.sendQueued();
+        } else {
+            // the new window's first frame is still to come: a waiting update goes out after it (or after a moment)
+            this._firstFrameTimer = this._clock.setTimeout(() => {
+                this._firstFrameTimer = undefined;
+                this.sendQueued();
+            }, firstFrameWaitMs);
+        }
     }
 
     /** A frame arrived. `drawable`: it has pixels (an empty frame is acknowledged but not shown). */
@@ -109,6 +164,9 @@ export class FrameFlow<F extends { sequenceId: number }> {
         } else {
             this.ack(frame.sequenceId);
         }
+        if (this._firstFrameTimer !== undefined) {
+            this.sendQueued(); // the window's first frame is acknowledged: the next window may come
+        }
     }
 
     /** The connection is gone: nothing more is sent. */
@@ -117,6 +175,11 @@ export class FrameFlow<F extends { sequenceId: number }> {
         this._ackTimers.forEach((t) => this._clock.clearTimeout(t));
         this._ackTimers.clear();
         this._held = undefined;
+        this._queued = undefined;
+        if (this._firstFrameTimer !== undefined) {
+            this._clock.clearTimeout(this._firstFrameTimer);
+            this._firstFrameTimer = undefined;
+        }
     }
 
     private accept(frame: F) {

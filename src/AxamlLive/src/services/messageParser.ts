@@ -21,7 +21,7 @@ export class Messages {
     public static readonly pointerReleased = "4ADC84EEE7C84BCF986CDE3A2F78EDE4";
     public static readonly scroll = "79301A05F02D4B90BB39472563B504AE";
     public static readonly key = "1C3B691E3D544237BFB09FEA83BC1DB8";
-    public static readonly textInput = "C174102E37054594916FB10B8248A17D";
+    public static readonly textInput = "C174102E74054594916FB10B8248A17D";
 
     public static clientSupportedPixelFormatsMessage(): Buffer {
         return createMessage(Messages.clientSupportedPixelFormats, { Formats: [PixelFormat.Rgba8888] });

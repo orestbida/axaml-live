@@ -23,6 +23,8 @@ export type SessionState = "starting" | "ready" | "exited";
 /** One element on the path from the top-level to the control under the pointer (src/DesignerHook). */
 export interface InspectedElement {
     type: string;
+    /** Full type name (namespace included): finds a view's .axaml by its x:Class. */
+    fullType?: string;
     index: number;
     x?: number;
     y?: number;
@@ -241,8 +243,15 @@ export class PreviewSession implements vscode.Disposable {
         const assemblyPath = this.mapAssembly(file.targetPath);
         const projectDir = path.dirname(file.projectPath);
         const relative = "/" + path.relative(projectDir, file.path).split(path.sep).join("/");
-        this._flow?.updateSent();
-        this._socket.write(Messages.updateXamlMessage(assemblyPath, text, relative));
+        const socket = this._socket;
+        const message = Messages.updateXamlMessage(assemblyPath, text, relative);
+        const send = () => !socket.destroyed && socket.write(message);
+        // one update in flight: the flow sends this one now, or after the designer answered the previous one
+        if (this._flow) {
+            this._flow.update(send);
+        } else {
+            send();
+        }
     }
 
     /** Flow-control events (frames held/dropped, acknowledgements), for diagnostics. */

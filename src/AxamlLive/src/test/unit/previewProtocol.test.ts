@@ -4,6 +4,31 @@ import { Messages, MessageReader, InputModifier, mapKey } from "../../services/m
 import { averageLuminance, changedRect, cropRows, FrameRateLimiter, sampleAlpha } from "../../services/frameStats";
 import { designTimeConfigProperties } from "../../services/runtimeConfig";
 
+suite("preview protocol message ids", () => {
+    // from Avalonia.Remote.Protocol (the same in 11.3 and 12.2): a wrong id makes the designer drop the connection
+    const avalonia: [keyof typeof Messages, string][] = [
+        ["htmlTransportStarted", "53778004-78fa-4381-8ec3-176a6f2328b6"],
+        ["startDesignerSession", "854887CF-2694-4EB6-B499-7461B6FB96C7"],
+        ["updateXamlResult", "B7A70093-0C5D-47FD-9261-22086D43A2E2"],
+        ["clientRenderInfo", "7A3c25d3-3652-438D-8EF1-86E942CC96C0"],
+        ["clientSupportedPixelFormats", "63481025-7016-43FE-BADC-F2FD0F88609E"],
+        ["updateXaml", "9AEC9A2E-6315-4066-B4BA-E9A9EFD0F8CC"],
+        ["frame", "F58313EE-FE69-4536-819D-F52EDF201A0E"],
+        ["frameReceived", "68014F8A-289D-4851-8D34-5367EDA7F827"],
+        ["pointerMoved", "6228F0B9-99F2-4F62-A621-414DA2881648"],
+        ["pointerPressed", "7E9E2818-F93F-411A-800E-6B1AEB11DA46"],
+        ["pointerReleased", "4ADC84EE-E7C8-4BCF-986C-DE3A2F78EDE4"],
+        ["scroll", "79301A05-F02D-4B90-BB39-472563B504AE"],
+        ["key", "1C3B691E-3D54-4237-BFB0-9FEA83BC1DB8"],
+        ["textInput", "C174102E-7405-4594-916F-B10B8248A17D"],
+    ];
+    for (const [name, id] of avalonia) {
+        test(`${name} matches Avalonia's id`, () => {
+            assert.strictEqual(String(Messages[name]).toUpperCase(), id.replace(/-/g, "").toUpperCase());
+        });
+    }
+});
+
 suite("preview protocol messages", () => {
     test("render info DPI is serialized as BSON double (the designer rejects int32)", () => {
         const msg = Messages.clientRenderInfoMessage(2);
