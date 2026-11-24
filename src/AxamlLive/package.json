@@ -130,6 +130,12 @@
         "icon": "$(debug-alt)"
       },
       {
+        "command": "axamlLive.runApp",
+        "title": "Run Project",
+        "category": "AXAML Live",
+        "icon": "$(play)"
+      },
+      {
         "command": "axamlLive.installTemplates",
         "title": "Install / Update Avalonia Project Templates",
         "category": "AXAML Live"
@@ -137,6 +143,11 @@
     ],
     "menus": {
       "editor/title": [
+        {
+          "when": "editorLangId == AXAML",
+          "command": "axamlLive.runApp",
+          "group": "navigation@0"
+        },
         {
           "when": "editorLangId == AXAML",
           "command": "axamlLive.showPreviewToSide",
@@ -192,11 +203,24 @@
             "default": "messages",
             "description": "Traces the communication between VS Code and the language server."
           },
+          "axamlLive.previewer.updateOn": {
+            "type": "string",
+            "enum": [
+              "change",
+              "save"
+            ],
+            "enumDescriptions": [
+              "Update the preview while you type, without saving.",
+              "Update the preview only when the file is saved."
+            ],
+            "default": "change",
+            "description": "When the preview is updated with your edits."
+          },
           "axamlLive.previewer.updateDelay": {
             "type": "number",
             "default": 300,
             "minimum": 0,
-            "description": "Delay in milliseconds before unsaved AXAML edits are sent to the previewer."
+            "description": "Delay in milliseconds before unsaved AXAML edits are sent to the previewer (when axamlLive.previewer.updateOn is change)."
           },
           "axamlLive.previewer.buildIfNeeded": {
             "type": "boolean",

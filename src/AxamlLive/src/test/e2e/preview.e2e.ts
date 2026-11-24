@@ -423,6 +423,115 @@ suite("Avalonia previewer (e2e)", () => {
         await checkpoint("live-edit");
     });
 
+    test("a drop-down opened with a click stays open", async () => {
+        await showMain();
+        const file = path.join(path.dirname(mainWindow), "E2eComboBox.axaml");
+        fs.writeFileSync(
+            file,
+            `<UserControl xmlns="https://github.com/avaloniaui" Width="300" Height="260" Background="Black">\n` +
+                `  <ComboBox Margin="10" Width="200" VerticalAlignment="Top" SelectedIndex="0">\n` +
+                `    <ComboBoxItem Content="One" /><ComboBoxItem Content="Two" /><ComboBoxItem Content="Three" /><ComboBoxItem Content="Four" />\n` +
+                `  </ComboBox>\n` +
+                `</UserControl>`
+        );
+        const input = (kind: string, x: number, y: number, extra: object = {}) =>
+            previewCommand({ type: "input", kind, x, y, modifiers: [], ...extra });
+        const lum = async () => (await state()).preview?.frame?.avgLum ?? 0;
+        try {
+            const before = await state();
+            await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(file), vscode.ViewColumn.One);
+            await waitFor("combo box view", (s) => sizeIs(s, 300, 260) && (s.xamlResults ?? 0) > (before.xamlResults ?? 0), 30000);
+            await sleep(1500);
+            const closed = await lum();
+            const variants: [string, () => Promise<unknown>][] = [
+                [
+                    "plain click",
+                    async () => {
+                        await input("pointerPressed", 100, 26, { button: 1, modifiers: [4] });
+                        await input("pointerReleased", 100, 26, { button: 1 });
+                    },
+                ],
+                [
+                    "move while pressed",
+                    async () => {
+                        await input("pointerPressed", 100, 26, { button: 1, modifiers: [4] });
+                        await input("pointerMoved", 101, 27, { modifiers: [4] });
+                        await input("pointerReleased", 101, 27, { button: 1 });
+                    },
+                ],
+                [
+                    "late move after release",
+                    async () => {
+                        await input("pointerPressed", 100, 26, { button: 1, modifiers: [4] });
+                        await input("pointerReleased", 100, 26, { button: 1 });
+                        await input("pointerMoved", 101, 27, { modifiers: [4] });
+                    },
+                ],
+            ];
+            const results: string[] = [];
+            for (const [name, click] of variants) {
+                await click();
+                await sleep(400);
+                const opened = await lum();
+                await sleep(1500);
+                const later = await lum();
+                results.push(`${name}: closed=${closed.toFixed(1)} opened=${opened.toFixed(1)} after1.5s=${later.toFixed(1)}`);
+                // close it again with a click on the black area
+                await input("pointerPressed", 280, 250, { button: 1, modifiers: [4] });
+                await input("pointerReleased", 280, 250, { button: 1 });
+                await sleep(800);
+            }
+            console.log(`[e2e] combo box: ${results.join(" | ")}`);
+            for (const r of results) {
+                const [, c, o, l] = /closed=([\d.]+) opened=([\d.]+) after1.5s=([\d.]+)/.exec(r)!.map(Number);
+                assert.ok(o > c + 3, `drop-down did not open (${r})`);
+                assert.ok(l > c + 3, `drop-down closed by itself (${r})`);
+            }
+        } finally {
+            await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(file), vscode.ViewColumn.One);
+            await vscode.commands.executeCommand("workbench.action.closeActiveEditor");
+            fs.rmSync(file, { force: true });
+            await showMain();
+        }
+    });
+
+    test("update on save: unsaved edits wait until the file is saved", async () => {
+        await showMain();
+        const config = vscode.workspace.getConfiguration("axamlLive.previewer");
+        await config.update("updateOn", "save", vscode.ConfigurationTarget.Global);
+        const original = "Live edit from the e2e test";
+        const at = editor.document.getText().indexOf(original);
+        assert.ok(at > 0, "live edit content missing");
+        const range = new vscode.Range(editor.document.positionAt(at), editor.document.positionAt(at + original.length));
+        try {
+            // wait until earlier updates (file switch, the setting change) are done
+            let before = (await state()).xamlResults ?? 0;
+            for (let quiet = 0; quiet < 6;) {
+                await sleep(500);
+                const now = (await state()).xamlResults ?? 0;
+                quiet = now === before ? quiet + 1 : 0;
+                before = now;
+            }
+            await editor.edit((e) => e.replace(range, "Shown after saving"));
+            await sleep(2000);
+            assert.strictEqual((await state()).xamlResults ?? 0, before, "the preview was updated before saving");
+            await editor.document.save();
+            await waitFor("update after save", (s) => (s.xamlResults ?? 0) > before && noXamlError(s), 30000);
+        } finally {
+            await config.update("updateOn", undefined, vscode.ConfigurationTarget.Global);
+            const now = editor.document.getText().indexOf("Shown after saving");
+            if (now > 0) {
+                await editor.edit((e) =>
+                    e.replace(
+                        new vscode.Range(editor.document.positionAt(now), editor.document.positionAt(now + "Shown after saving".length)),
+                        original
+                    )
+                );
+            }
+            await editor.document.save();
+        }
+    });
+
     test("reports XAML errors in the panel and Problems view", async () => {
         await showMain();
         const pos = editor.document.positionAt(editor.document.getText().indexOf("<Button"));
@@ -442,6 +551,43 @@ suite("Avalonia previewer (e2e)", () => {
         assert.strictEqual(diags().length, 0);
         await editor.document.save();
         await checkpoint("error-fixed");
+    });
+
+    test("a XAML error does not turn off the automatic design data context", async () => {
+        await showMain();
+        const file = path.join(path.dirname(mainWindow), "E2eDesignData.axaml");
+        fs.writeFileSync(
+            file,
+            `<UserControl xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" x:DataType="TextBlock" Width="320" Height="140">\n` +
+                `  <TextBlock Text="{Binding FontSize}" FontSize="20" FontWeight="Bold" Margin="8,0,0,18" />\n` +
+                `</UserControl>`
+        );
+        try {
+            const before = await state();
+            const doc = await vscode.workspace.openTextDocument(file);
+            const ed = await vscode.window.showTextDocument(doc, vscode.ViewColumn.One);
+            let s = await waitFor(
+                "view with design data",
+                (s) => sizeIs(s, 320, 140) && (s.xamlResults ?? 0) > (before.xamlResults ?? 0),
+                30000
+            );
+            await waitFor("no error", noXamlError, 30000);
+            assert.ok((await state()).designDataContext, "automatic design data context not used");
+
+            const at = doc.getText().indexOf('FontWeight="Bold"');
+            const range = new vscode.Range(doc.positionAt(at), doc.positionAt(at + 'FontWeight="Bold"'.length));
+            await ed.edit((e) => e.replace(range, 'FontWeight="Bolt"'));
+            await waitFor("error for the invalid value", (s) => !!(s.lastXaml?.error || s.lastXaml?.message), 30000);
+            await ed.edit((e) =>
+                e.replace(new vscode.Range(range.start, doc.positionAt(at + 'FontWeight="Bolt"'.length)), 'FontWeight="Bold"')
+            );
+            s = await waitFor("recovered", noXamlError, 30000);
+            assert.ok(s.designDataContext, "design data context still off after the error was fixed (bound content missing)");
+        } finally {
+            await vscode.commands.executeCommand("workbench.action.revertAndCloseActiveEditor");
+            fs.rmSync(file, { force: true });
+            await showMain();
+        }
     });
 
     test("half-typed values report an error and keep the previewer alive (AvaloniaPro #65)", async () => {
@@ -567,8 +713,7 @@ suite("Avalonia previewer (e2e)", () => {
         const file = path.join(vmDir, "E2eAddedControl.cs");
         fs.writeFileSync(file, `namespace ${ns};\npublic class E2eAddedControl : Avalonia.Controls.TextBlock { }\n`);
         try {
-            const before = await completionLabels("<vm:");
-            assert.ok(!before.some((l) => l.endsWith("E2eAddedControl")));
+            // the type can be known from the source already; after the build it must be known in any case
             await vscode.commands.executeCommand("axamlLive.createPreviewerAssets");
             await waitFor("ready after build", (s) => s.sessionState === "ready" && !s.building, 180000);
             const after = await completionLabels("<vm:");

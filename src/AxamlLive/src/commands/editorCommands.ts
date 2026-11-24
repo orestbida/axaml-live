@@ -166,6 +166,15 @@ export class RunProjectCommand implements Command {
     }
 }
 
+/** Builds and starts the app without debugging (the Run button in the editor title bar). */
+export class RunAppCommand implements Command {
+    public readonly id = "axamlLive.runApp";
+
+    execute(): Promise<boolean> {
+        return new RunProjectCommand().execute({ debug: false });
+    }
+}
+
 /** dotnet new install Avalonia.Templates (installs or updates to the latest version). */
 export class InstallTemplatesCommand implements Command {
     public readonly id = "axamlLive.installTemplates";

@@ -34,7 +34,8 @@ Open the folder, open an `.axaml` file and click **Show preview** in the editor 
 
 ## Previewer
 
-- The preview updates while you type; saving is not needed.
+- The preview updates while you type; saving is not needed. To update it only on save, set
+  `axamlLive.previewer.updateOn` to `save`.
 - Mouse, wheel and keyboard input is sent to the previewed UI. The mouse button in the toolbar turns this off.
 - Zoom with -/+ or Ctrl+Wheel, or use Fit All and Fit Width. The preview is rendered at the zoomed size.
 - Theme: the app theme, Light or Dark.
@@ -80,6 +81,7 @@ Open the folder, open an `.axaml` file and click **Show preview** in the editor 
 | `axamlLive.previewer.enableInput` | `true` | send mouse and keyboard input to the preview |
 | `axamlLive.previewer.fpsLimit` | `60` | frames per second for animations, 0 = no limit |
 | `axamlLive.previewer.maxRenderScale` | `3` | highest render scale when zoomed in |
+| `axamlLive.previewer.updateOn` | `change` | `change`: update while you type, `save`: update when the file is saved |
 | `axamlLive.previewer.updateDelay` | `300` | milliseconds before unsaved changes are sent |
 | `axamlLive.previewer.buildIfNeeded` | `true` | build automatically when there is no build output |
 | `axamlLive.previewer.hostProject` | `""` | the app project that hosts the preview |
@@ -91,7 +93,8 @@ Open the folder, open an `.axaml` file and click **Show preview** in the editor 
 
 ## Commands
 
-**Show preview**, **Restart previewer**, **Build project and reload preview**, **Run / Debug Project**,
+**Show preview**, **Run Project** (play button in the editor title bar: builds and starts the app), **Restart
+previewer**, **Build project and reload preview**, **Run / Debug Project**,
 **Show Code-behind**, **Show ViewModel**, **New Avalonia Item...** (Explorer folder menu), **Create a new Avalonia
 Project**, **Install / Update Avalonia Project Templates**, **Select solution**, **Select previewer host project**.
 

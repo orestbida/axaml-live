@@ -75,6 +75,8 @@ export class PreviewController implements vscode.Disposable {
     private _pushedDesignDataContext = false;
     /** Files whose x:DataType could not be constructed by the designer; cleared when the previewer restarts. */
     private readonly _designDataContextFailed = new Map<string, string>(); // file -> hint for the panel
+    /** The last update is the retry without the automatic data context after an error. */
+    private _retryingWithoutDesignData = false;
     private _restarts = 0;
     private readonly _disposables: vscode.Disposable[] = [];
     private readonly _diagnostics = vscode.languages.createDiagnosticCollection("AXAML Live Preview");
@@ -109,7 +111,7 @@ export class PreviewController implements vscode.Disposable {
                 }
             }),
             vscode.workspace.onDidChangeTextDocument((e) => {
-                if (this._file && samePath(e.document.uri.fsPath, this._file.fsPath) && e.contentChanges.length) {
+                if (this._file && samePath(e.document.uri.fsPath, this._file.fsPath) && e.contentChanges.length && !this.updateOnSave) {
                     clearTimeout(this._editTimer);
                     this._editTimer = setTimeout(() => this.pushXaml(), this.editDelay);
                 }
@@ -124,6 +126,7 @@ export class PreviewController implements vscode.Disposable {
                 }
                 if (
                     e.affectsConfiguration("axamlLive.previewer.designDataContext") ||
+                    e.affectsConfiguration("axamlLive.previewer.updateOn") ||
                     e.affectsConfiguration("axamlLive.previewer.background")
                 ) {
                     this.pushXaml();
@@ -145,6 +148,11 @@ export class PreviewController implements vscode.Disposable {
 
     private get config() {
         return vscode.workspace.getConfiguration("axamlLive.previewer");
+    }
+
+    /** axamlLive.previewer.updateOn = "save": the preview shows the saved file only. */
+    private get updateOnSave(): boolean {
+        return this.config.get<string>("updateOn", "change") === "save";
     }
 
     private get editDelay(): number {
@@ -491,6 +499,7 @@ export class PreviewController implements vscode.Disposable {
         this._session?.dispose();
         this._session = undefined;
         this._designDataContextFailed.clear();
+        this._retryingWithoutDesignData = false;
         this.disposeWatchers();
     }
 
@@ -521,7 +530,7 @@ export class PreviewController implements vscode.Disposable {
         if (!details) {
             return;
         }
-        const doc = vscode.workspace.textDocuments.find((d) => samePath(d.uri.fsPath, file.fsPath));
+        const doc = this.updateOnSave ? undefined : vscode.workspace.textDocuments.find((d) => samePath(d.uri.fsPath, file.fsPath));
         let text = doc ? doc.getText() : await fs.readFile(file.fsPath, "utf-8").catch(() => undefined);
         if (text === undefined) {
             return;
@@ -553,8 +562,17 @@ export class PreviewController implements vscode.Disposable {
             // the x:DataType could not be constructed at design time: preview without it
             logger.info(`Preview without automatic design data context for ${path.basename(file.fsPath)}: ${error.split("\n")[0]}`);
             this._designDataContextFailed.set(file.fsPath, designDataHint(error));
+            this._retryingWithoutDesignData = true;
             this.pushXaml();
             return;
+        }
+        if (file && this._retryingWithoutDesignData) {
+            this._retryingWithoutDesignData = false;
+            if (error) {
+                // it fails without the data context too: the error is in the file (a typo), not in the view model,
+                // so the next valid edit gets the design data context again
+                this._designDataContextFailed.delete(file.fsPath);
+            }
         }
         // recorded only now: the result of the attempt with the automatic data context is not the file's result
         this._lastXaml = r;
