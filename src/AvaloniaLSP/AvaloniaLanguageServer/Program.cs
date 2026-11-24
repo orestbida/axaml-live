@@ -29,6 +29,7 @@ public class Program {
             .WithHandler<DefinitionHandler>()
             .WithHandler<CodeActionHandler>()
             .WithHandler<WatchedFilesHandler>()
+            .WithHandler<InlayHintHandler>()
             .WithServices(ConfigureServices)
             .OnInitialize((init_server, request, token) => {
                 server = init_server;
@@ -38,8 +39,8 @@ public class Program {
 
     static void ConfigureServices(IServiceCollection services) {
         services.AddSingleton(new ConfigurationItem { Section = "Avalonia Server" });
-        services.AddSingleton(new DocumentSelector(
-            new DocumentFilter { Pattern = "**/*.axaml" }
+        services.AddSingleton(new TextDocumentSelector(
+            new TextDocumentFilter { Pattern = "**/*.axaml" }
         ));
         services.AddSingleton<Workspace>();
         services.AddSingleton<AvaloniaLanguageServer.Services.DiagnosticsService>();

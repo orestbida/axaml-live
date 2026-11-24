@@ -171,6 +171,74 @@ public sealed class XamlAnalyzer {
         }
     }
 
+    /// <summary>
+    /// Type of each resolvable binding path (x:DataType), placed after the closing brace of the binding:
+    /// {Binding Name} : string.
+    /// </summary>
+    public List<(Position Position, string Label)> BindingTypeHints() {
+        var hints = new List<(Position, string)>();
+        if (_compilation == null || _metadata == null) {
+            return hints;
+        }
+
+        foreach (var el in _doc.Elements) {
+            if (Skip(el.NamespaceUri) || el.IsPropertyElement) {
+                continue;
+            }
+
+            var type = ResolveType(el.NamespaceUri, el.LocalName);
+            foreach (var a in el.Attributes) {
+                if (a.Prefix != "" || a.LocalName.StartsWith("Classes.", StringComparison.Ordinal)) {
+                    continue;
+                }
+                // bindings on binding-typed properties are evaluated per item, not against this data context
+                if (type != null && !a.LocalName.Contains('.') && IsBindingType(FindProperty(type, a.LocalName)?.Type)) {
+                    continue;
+                }
+
+                var m = BindingRegex.Match(a.Value);
+                if (!m.Success || HasBindingSource(a.Value) || DataTypeOf(el) is not { } dataType) {
+                    continue;
+                }
+
+                var current = _compilation.GetTypeByMetadataName(dataType);
+                ITypeSymbol? result = null;
+                foreach (var segment in m.Groups["path"].Value.Split('.')) {
+                    var member = current == null ? null : FindMember(current, segment);
+                    result = member switch {
+                        IPropertySymbol p => p.Type,
+                        IFieldSymbol f => f.Type,
+                        _ => null,
+                    };
+                    if (result == null) {
+                        break;
+                    }
+
+                    current = result as INamedTypeSymbol;
+                }
+
+                int close = ClosingBrace(a.Value);
+                if (result != null && close >= 0) {
+                    hints.Add((_doc.PositionOf(a.ValueOffset + close + 1), ": " + result.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)));
+                }
+            }
+        }
+        return hints;
+    }
+
+    /// <summary>Index of the brace that closes the markup extension starting at the first character, or -1.</summary>
+    static int ClosingBrace(string value) {
+        int depth = 0;
+        for (int i = 0; i < value.Length; i++) {
+            if (value[i] == '{') {
+                depth++;
+            } else if (value[i] == '}' && --depth == 0) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
     static bool HasBindingSource(string value) =>
         Regex.IsMatch(value, @"\b(ElementName|RelativeSource|Source|DataType)\s*=") || value.Contains('$') || value.Contains('#');
 

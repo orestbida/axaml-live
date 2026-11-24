@@ -1,4 +1,5 @@
 using Avalonia.Ide.CompletionEngine;
+using AvaloniaLanguageServer.Services;
 using AvaloniaLanguageServer.Models;
 using OmniSharp.Extensions.LanguageServer.Protocol.Server;
 
@@ -28,6 +29,17 @@ public class CompletionHandler : CompletionHandlerBase {
         }
 
         var metadata = await InitializeCompletionEngineAsync(request.TextDocument.Uri);
+
+        var style = StyleCompletion.Complete(text, _workspace.BufferService.GetText(request.TextDocument.Uri) ?? text, metadata,
+            () => OtherAxamlFiles(request.TextDocument.Uri));
+        if (style != null) {
+            var styleRange = new OmniSharp.Extensions.LanguageServer.Protocol.Models.Range(OffsetToPosition(text, style.Start), request.Position);
+            return new CompletionList(style.Items.Select(i => i with {
+                FilterText = i.Label,
+                TextEdit = new TextEditOrInsertReplaceEdit(new TextEdit { Range = styleRange, NewText = i.Label }),
+            }), isIncomplete: false);
+        }
+
         if (metadata == null) {
             return new CompletionList(new[] {
                 new CompletionItem {
@@ -86,12 +98,62 @@ public class CompletionHandler : CompletionHandlerBase {
         return _workspace.CompletionMetadata;
     }
 
-    public CompletionHandler(Workspace workspace, DocumentSelector documentSelector, Func<ILanguageServer?> getServer) {
+    public CompletionHandler(Workspace workspace, TextDocumentSelector documentSelector, Func<ILanguageServer?> getServer) {
         _workspace = workspace;
         _documentSelector = documentSelector;
         _getServer = getServer;
 
         _completionEngine = new CompletionEngine();
+    }
+
+    readonly Dictionary<string, (DateTime Stamp, string Text)> _axamlCache = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>The other .axaml files of the workspace (open editors first), for style classes defined there.</summary>
+    IEnumerable<(string Name, string Text)> OtherAxamlFiles(DocumentUri current) {
+        var root = _getServer()?.Client.ClientSettings.RootPath ?? _workspace.ProjectInfo?.ProjectDirectory;
+        if (root == null || !Directory.Exists(root)) {
+            yield break;
+        }
+
+        var currentPath = Utilities.Utils.FromUri(current);
+        IEnumerable<string> files;
+        try {
+            files = Directory.EnumerateFiles(root, "*.axaml", SearchOption.AllDirectories)
+                .Where(f => !f.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}") && !f.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}"))
+                .Take(500).ToList();
+        } catch (Exception) {
+            yield break;
+        }
+
+        foreach (var file in files) {
+            var uri = DocumentUri.FromFileSystemPath(file);
+            if (uri == current || string.Equals(Path.GetFullPath(file), Path.GetFullPath(currentPath), StringComparison.OrdinalIgnoreCase)) {
+                continue;
+            }
+
+            var open = _workspace.BufferService.GetText(uri);
+            if (open != null) {
+                yield return (Path.GetFileName(file), open);
+                continue;
+            }
+
+            string? text = null;
+            try {
+                var stamp = File.GetLastWriteTimeUtc(file);
+                if (!_axamlCache.TryGetValue(file, out var cached) || cached.Stamp != stamp) {
+                    cached = (stamp, File.ReadAllText(file));
+                    _axamlCache[file] = cached;
+                }
+
+                text = cached.Text;
+            } catch (IOException) {
+                // being written: skipped this time
+            }
+
+            if (text != null) {
+                yield return (Path.GetFileName(file), text);
+            }
+        }
     }
 
     static Position OffsetToPosition(string text, int offset) {
@@ -126,7 +188,7 @@ public class CompletionHandler : CompletionHandlerBase {
     }
 
     readonly Workspace _workspace;
-    readonly DocumentSelector _documentSelector;
+    readonly TextDocumentSelector _documentSelector;
     readonly Func<ILanguageServer?> _getServer;
 
     readonly CompletionEngine _completionEngine;

@@ -382,7 +382,8 @@
         "*.axaml": "${capture}.axaml.cs, ${capture}.axaml.fs"
       },
       "[AXAML]": {
-        "editor.defaultFormatter": "OrestBida.axaml-live"
+        "editor.defaultFormatter": "OrestBida.axaml-live",
+        "editor.wordBasedSuggestions": "off"
       }
     },
     "keybindings": [

@@ -57,6 +57,10 @@ Open the folder, open an `.axaml` file and click **Show preview** in the editor 
 ## Editing AXAML
 
 - Completion for elements, properties, markup extensions, resources and `x:` directives.
+- Completion in style selectors (types, `.classes`, `:pseudo-classes`, `#names`, controls after `/template/`) and
+  in `Classes="..."`, with the classes used in the project's .axaml files.
+- The type of compiled bindings is shown after them (`{Binding Name} : string`). Turn this off with
+  `editor.inlayHints.enabled`.
 - Diagnostics without building: unknown types, properties, events and binding paths (`x:DataType`), with quick fixes
   (for example "Change to 'Button'").
 - Hover with type and property documentation.

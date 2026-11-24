@@ -692,6 +692,112 @@ suite("Avalonia previewer (e2e)", () => {
         return line;
     }
 
+    test("completion in style selectors and Classes", async () => {
+        const file = path.join(path.dirname(mainWindow), "E2eStyles.axaml");
+        const template = (selector: string, classes: string) =>
+            `<UserControl xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">\n` +
+            `  <UserControl.Styles>\n` +
+            `    <Style Selector="TextBlock.caption"><Setter Property="Opacity" Value="0.6" /></Style>\n` +
+            `    <Style Selector="Button.primary:pointerover"><Setter Property="Opacity" Value="0.9" /></Style>\n` +
+            `    <Style Selector="${selector}" />\n` +
+            `  </UserControl.Styles>\n` +
+            `  <StackPanel>\n` +
+            `    <Button x:Name="SaveButton" Classes="${classes}" Content="Save" />\n` +
+            `    <TextBlock Classes="caption" Text="Hello" />\n` +
+            `  </StackPanel>\n` +
+            `</UserControl>`;
+        fs.writeFileSync(file, template("", ""));
+        const doc = await vscode.workspace.openTextDocument(file);
+        const ed = await vscode.window.showTextDocument(doc, vscode.ViewColumn.One);
+        const labelsAt = async (selector: string, classes: string) => {
+            const text = template(selector, classes);
+            const marker = text.indexOf("|");
+            await ed.edit((e) =>
+                e.replace(new vscode.Range(doc.positionAt(0), doc.positionAt(doc.getText().length)), text.replace("|", ""))
+            );
+            const at = doc.positionAt(marker);
+            let labels: string[] = [];
+            for (let i = 0; i < 20 && !labels.some((l) => l !== "Build the project"); i++) {
+                const list = await vscode.commands.executeCommand<vscode.CompletionList>(
+                    "vscode.executeCompletionItemProvider",
+                    doc.uri,
+                    at
+                );
+                labels = list.items.map((it) => (typeof it.label === "string" ? it.label : it.label.label));
+                if (!labels.some((l) => l !== "Build the project")) {
+                    await sleep(1000);
+                }
+            }
+            return labels;
+        };
+        try {
+            // name, selector, Classes value ("|" is the cursor), labels that must be offered, labels that must not
+            const cases: [string, string, string, string[], string[]][] = [
+                ["selector start", "|", "", ["Button", ":is()"], []],
+                ["pseudo-class", "Button:|", "", [":pointerover", ":pressed"], []],
+                ["style class", "Button.|", "", ["caption", "primary", "accent"], ["Opacity", "Button"]],
+                ["class without type", ".|", "", ["caption", "primary"], []],
+                ["class being typed", "Button.cap|", "", ["caption"], ["cap"]],
+                ["name", "Button#|", "", ["SaveButton"], ["caption"]],
+                ["control after /template/", "Button /template/ |", "", ["ContentPresenter", "Border"], []],
+                ["Classes attribute", "", "|", ["caption", "primary", "accent"], []],
+                ["second class", "", "primary |", ["caption"], ["primary"]],
+            ];
+            for (const [name, selector, classes, expected, unexpected] of cases) {
+                const labels = await labelsAt(selector, classes);
+                console.log(`[e2e] completion ${name}: ${labels.length} ${labels.slice(0, 12).join(", ")}`);
+                for (const e of expected) {
+                    assert.ok(labels.includes(e), `${name}: '${e}' missing (${labels.slice(0, 20).join(", ")})`);
+                }
+                for (const u of unexpected) {
+                    assert.ok(!labels.includes(u), `${name}: '${u}' should not be offered`);
+                }
+            }
+        } finally {
+            await vscode.commands.executeCommand("workbench.action.revertAndCloseActiveEditor");
+            fs.rmSync(file, { force: true });
+        }
+    });
+
+    test("inlay hints show the type of binding paths", async () => {
+        await showMain();
+        const text = editor.document.getText();
+        const hints = async () => {
+            let list: vscode.InlayHint[] = [];
+            for (let i = 0; i < 20 && !list.length; i++) {
+                list =
+                    (await vscode.commands.executeCommand<vscode.InlayHint[]>(
+                        "vscode.executeInlayHintProvider",
+                        editor.document.uri,
+                        new vscode.Range(0, 0, editor.document.lineCount, 0)
+                    )) ?? [];
+                if (!list.length) {
+                    await sleep(1000);
+                }
+            }
+            return list.map((h) => ({
+                line: h.position.line,
+                character: h.position.character,
+                label: typeof h.label === "string" ? h.label : h.label.map((p) => p.value).join(""),
+            }));
+        };
+        const at = text.indexOf("<TextBlock");
+        assert.ok(at > 0, "no TextBlock in the main window");
+        const pos = editor.document.positionAt(at);
+        const binding = '<TextBlock Text="{Binding Greeting}" />';
+        await editor.edit((e) => e.insert(pos, binding));
+        try {
+            const list = await hints();
+            console.log(`[e2e] inlay hints: ${JSON.stringify(list)}`);
+            const end = pos.translate(0, binding.indexOf("}") + 1);
+            const hint = list.find((h) => h.line === end.line && h.character === end.character);
+            assert.ok(hint, "no hint after {Binding Greeting}");
+            assert.strictEqual(hint.label, ": string");
+        } finally {
+            await editor.edit((e) => e.delete(new vscode.Range(pos, pos.translate(0, binding.length))));
+        }
+    });
+
     test("closing tag and prefixed completions replace the typed text (#166)", async () => {
         const closing = await applyCompletion("<Grid></", "/Grid>");
         assert.ok(closing.startsWith("<Grid></Grid>"), `closing tag: ${closing}`);
