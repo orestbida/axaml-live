@@ -238,6 +238,10 @@ export class PreviewController implements vscode.Disposable {
     private _optionsTimer: NodeJS.Timeout | undefined;
     private _watchdog: NodeJS.Timeout | undefined;
     private _renderCheck: NodeJS.Timeout | undefined;
+    /** Frames drawn before the last update: the first frame of the new window can arrive before its result. */
+    private _framesAtPush = 0;
+    /** What the session was last sent, so switching back to an unchanged file does not reopen its design window. */
+    private _lastPushed: { session: PreviewSession; file: string; text: string } | undefined;
     private readonly _stallGuard = new CrashGuard();
     private _stalls = 0;
 
@@ -390,7 +394,7 @@ export class PreviewController implements vscode.Disposable {
         const session = this._session;
         if (session && session.state !== "exited" && isSameProject(session.project, target.project)) {
             this._panel?.setState({ ...this._panel.state, message: `${target.project.name} · ${path.basename(uri.fsPath)}` });
-            this.pushXaml();
+            this.pushXaml(true, true);
             return;
         }
         await this.startSession(target.project);
@@ -519,7 +523,7 @@ export class PreviewController implements vscode.Disposable {
         await this.setFile(this._file);
     }
 
-    private async pushXaml(retryIfStuck = true) {
+    private async pushXaml(retryIfStuck = true, skipIfUnchanged = false) {
         const file = this._file;
         const session = this._session;
         if (!file || !session) {
@@ -555,10 +559,16 @@ export class PreviewController implements vscode.Disposable {
         if (size) {
             text = applyDesignSize(text, size.width, size.height);
         }
+        const last = this._lastPushed;
+        if (skipIfUnchanged && last && last.session === session && samePath(last.file, file.fsPath) && last.text === text) {
+            return;
+        }
+        this._lastPushed = { session, file: file.fsPath, text };
         logger.debug(
             `UpdateXaml ${path.basename(file.fsPath)} theme=${this._theme} size=${size ? `${size.width}x${size.height}` : "design"}`
         );
         this.trace(`update ${path.basename(file.fsPath)}${this._pushedDesignDataContext ? " +designDC" : ""}`);
+        this._framesAtPush = this._frames;
         session.updateXaml(details, text);
         this.armWatchdog(this._frames, retryIfStuck);
     }
@@ -599,7 +609,7 @@ export class PreviewController implements vscode.Disposable {
                     message: `${this._session.project.name} · ${path.basename(file.fsPath)} · ${hint}`,
                 });
             }
-            this.checkRendered(file, this._frames);
+            this.checkRendered(file, this._framesAtPush);
             return;
         }
         const line = Math.max((r.line ?? 1) - 1, 0);

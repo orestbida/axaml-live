@@ -1691,6 +1691,21 @@ internal class E2eInternalThing : Avalonia.Controls.Control { }
         const s = await waitFor("ready after switching", (s) => s.sessionState === "ready", 30000);
         assert.strictEqual(s.sessionsStarted, started, "switching files in the same project must not restart the previewer");
         await checkpoint("switched-back");
+
+        // to a C# file and back: the unchanged view is not loaded again (scroll position and input stay)
+        await waitFor("result of the switch", (s) => (s.xamlResults ?? 0) > 0 && noXamlError(s), 30000);
+        await sleep(1000);
+        const results = (await state()).xamlResults ?? 0;
+        const cs = fs.readdirSync(path.dirname(mainWindow)).find((f) => f.endsWith(".axaml.cs"));
+        assert.ok(cs, "code-behind next to MainWindow.axaml");
+        await vscode.window.showTextDocument(
+            await vscode.workspace.openTextDocument(path.join(path.dirname(mainWindow), cs)),
+            vscode.ViewColumn.One
+        );
+        await sleep(500);
+        editor = await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(mainWindow), vscode.ViewColumn.One);
+        await sleep(2000);
+        assert.strictEqual((await state()).xamlResults ?? 0, results, "returning to an unchanged file must not reload the preview");
     });
 
     test("closing the preview stops the previewer", async () => {

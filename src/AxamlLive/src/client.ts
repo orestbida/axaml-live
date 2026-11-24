@@ -3,7 +3,7 @@ import * as lsp from "vscode-languageclient/node";
 import { getDotnetRuntimePath, getLanguageServerPath } from "./runtimeManager";
 import { avaloniaLanguageId, logger } from "./util/Utilities";
 import { getSolutionDataFile } from "./services/solutionParser";
-import { applyQuoteStyle } from "./features/editorFeatures";
+import { applySingleQuotes, singleQuotes } from "./features/editorFeatures";
 
 export async function createLanguageService(context: vscode.ExtensionContext): Promise<lsp.LanguageClient> {
     logger.appendLine("Creating language service");
@@ -33,12 +33,14 @@ export async function createLanguageService(context: vscode.ExtensionContext): P
             provideCompletionItem: async (document, position, context, token, next) => {
                 const result = await next(document, position, context, token);
                 const items = Array.isArray(result) ? result : result?.items;
-                items?.forEach((i) => applyQuoteStyle(i, document.uri));
+                if (items?.length && singleQuotes(document.uri)) {
+                    items.forEach(applySingleQuotes);
+                }
                 return result;
             },
             resolveCompletionItem: async (item, token, next) => {
                 const resolved = await next(item, token);
-                return resolved ? applyQuoteStyle(resolved, vscode.window.activeTextEditor?.document.uri) : resolved;
+                return resolved && singleQuotes(vscode.window.activeTextEditor?.document.uri) ? applySingleQuotes(resolved) : resolved;
             },
         },
     };

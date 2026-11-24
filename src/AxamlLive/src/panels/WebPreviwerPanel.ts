@@ -4,6 +4,7 @@ import { AppConstants } from "../util/Utilities";
 import { getNonce } from "../util/nonce";
 import { formFactors } from "../xaml/formFactors";
 import * as zlib from "zlib";
+import { promisify } from "util";
 import * as fs from "fs";
 import { changedRect, cropRows } from "../services/frameStats";
 
@@ -174,27 +175,42 @@ export class WebPreviewerPanel implements vscode.Disposable {
                 this._inFlight.push(Date.now());
                 const patch = cropRows(data, width, r);
                 this.sent.patches++;
-                this._panel.webview.postMessage({
-                    type: "patch",
-                    frame: { ...r, canvasWidth: width, canvasHeight: height, ...this.encode(patch) },
-                });
+                this.send("patch", { ...r, canvasWidth: width, canvasHeight: height }, patch);
                 return;
             }
         }
         this._inFlight.push(Date.now());
         this.sent.full++;
-        this._panel.webview.postMessage({ type: "frame", frame: { width, height, scale, stride: width * 4, ...this.encode(data) } });
+        this.send("frame", { width, height, scale, stride: width * 4 }, data);
     }
 
-    private encode(pixels: Uint8Array): { data: Uint8Array; deflated?: boolean } {
-        const t0 = Date.now();
-        const result =
-            !vscode.env.remoteName || pixels.length < 64 * 1024
-                ? { data: plainBytes(pixels) }
-                : { data: plainBytes(zlib.deflateRawSync(pixels, { level: 1 })), deflated: true };
-        this.sent.encodeMs += Date.now() - t0;
-        this.sent.bytes += result.data.length;
-        return result;
+    private _sending: Promise<void> = Promise.resolve();
+    private _queued = 0;
+
+    /**
+     * Posts a frame or patch. Compression (remote sessions) runs off the extension host's main thread; messages
+     * still reach the webview in order, since patches apply to the frame before them.
+     */
+    private send(type: "frame" | "patch", fields: object, pixels: Uint8Array) {
+        const compress = !!vscode.env.remoteName && pixels.length >= 64 * 1024;
+        if (!compress && this._queued === 0) {
+            this.sent.bytes += pixels.length;
+            this._panel.webview.postMessage({ type, frame: { ...fields, data: plainBytes(pixels) } });
+            return;
+        }
+        this._queued++;
+        this._sending = this._sending
+            .then(async () => {
+                const t0 = Date.now();
+                const encoded = compress
+                    ? { data: plainBytes(await deflateRaw(pixels, { level: 1 })), deflated: true }
+                    : { data: plainBytes(pixels) };
+                this.sent.encodeMs += Date.now() - t0;
+                this.sent.bytes += encoded.data.length;
+                await this._panel.webview.postMessage({ type, frame: { ...fields, ...encoded } });
+            })
+            .catch(() => undefined) // the panel was closed meanwhile
+            .finally(() => this._queued--);
     }
 
     /** Frames the webview has drawn (what the user sees). */
@@ -338,3 +354,4 @@ function plainBytes(data: Uint8Array): Uint8Array {
 
 /** Frames posted to the webview before waiting for its acknowledgements (hides the round trip of remote sessions). */
 const maxFramesInFlight = 3;
+const deflateRaw = promisify(zlib.deflateRaw);

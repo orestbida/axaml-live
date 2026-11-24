@@ -97,11 +97,13 @@ export class StyleBadges implements vscode.Disposable {
     }
 }
 
-/** Rewrites `=""` in attribute completions to `=''` when axamlLive.editor.attributeQuoteStyle is "single". */
-export function applyQuoteStyle<T extends vscode.CompletionItem>(item: T, uri: vscode.Uri | undefined): T {
-    if (vscode.workspace.getConfiguration("axamlLive.editor", uri).get<string>("attributeQuoteStyle", "double") !== "single") {
-        return item;
-    }
+/** True when axamlLive.editor.attributeQuoteStyle is "single" (read once per completion request, not per item). */
+export function singleQuotes(uri: vscode.Uri | undefined): boolean {
+    return vscode.workspace.getConfiguration("axamlLive.editor", uri).get<string>("attributeQuoteStyle", "double") === "single";
+}
+
+/** Rewrites `=""` in an attribute completion to `=''`. */
+export function applySingleQuotes<T extends vscode.CompletionItem>(item: T): T {
     const fix = (s: string) => s.replace(/=""/g, "=''");
     if (typeof item.insertText === "string") {
         item.insertText = fix(item.insertText);

@@ -33,12 +33,22 @@ function logicalChildren(el: XmlElement): XmlElement[] {
  * background borders, see applyThemeVariant): they are on the path but not in the file.
  * `pathIndex` is the index of the matched step, for its bounds.
  */
+let lastParsed: { xaml: string; root: XmlElement | undefined } | undefined;
+
+/** The parsed document, reused while the pointer moves over the same preview (the text only changes with an update). */
+function parsed(xaml: string): XmlElement | undefined {
+    if (lastParsed?.xaml !== xaml) {
+        lastParsed = { xaml, root: parseXml(xaml)?.root };
+    }
+    return lastParsed.root;
+}
+
 export function findElementByPath(
     xaml: string,
     path: PathStep[],
     wrapperDepth = 0
 ): { element: XmlElement; pathIndex: number } | undefined {
-    const root = parseXml(xaml)?.root;
+    const root = parsed(xaml);
     if (!root || !path.length) {
         return undefined;
     }

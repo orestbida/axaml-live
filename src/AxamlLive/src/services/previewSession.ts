@@ -370,6 +370,9 @@ export class PreviewSession implements vscode.Disposable {
             if (this._socket === socket) {
                 this._socket = undefined;
                 this._sessionStarted = false;
+                // results of updates sent on this connection never arrive: a new connection must not hold its frames
+                this._pendingUpdates = 0;
+                this._held = undefined;
             }
         });
     }
