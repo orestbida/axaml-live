@@ -111,7 +111,12 @@ public sealed class RoslynProjects : IDisposable {
                 if (ids.Length > 0 && !deleted && File.Exists(path)) {
                     var text = SourceText.From(await File.ReadAllTextAsync(path), Encoding.UTF8);
                     foreach (var id in ids) {
-                        _solution = _solution.WithDocumentText(id, text);
+                        // .axaml files are additional documents (AvaloniaXaml items), not C# documents
+                        if (_solution.ContainsDocument(id)) {
+                            _solution = _solution.WithDocumentText(id, text);
+                        } else if (_solution.ContainsAdditionalDocument(id)) {
+                            _solution = _solution.WithAdditionalDocumentText(id, text);
+                        }
                     }
                 } else if (ids.Length > 0 || (!deleted && _loaded.Keys.Any(p => path.StartsWith(Path.GetDirectoryName(p)! + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)))) {
                     _reloadNeeded = true; // file added to or removed from a project

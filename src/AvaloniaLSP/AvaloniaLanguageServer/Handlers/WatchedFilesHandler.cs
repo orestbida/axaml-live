@@ -24,7 +24,12 @@ public sealed class WatchedFilesHandler : DidChangeWatchedFilesHandlerBase {
                 continue;
             }
 
-            await _workspace.Roslyn.FileChangedAsync(path, change.Type == FileChangeType.Deleted);
+            // one failing file must not drop the other changes of the same notification
+            try {
+                await _workspace.Roslyn.FileChangedAsync(path, change.Type == FileChangeType.Deleted);
+            } catch (Exception e) {
+                Serilog.Log.Logger.Warning(e, "Failed to apply the change of {Path}", path);
+            }
         }
         return Unit.Value;
     }
