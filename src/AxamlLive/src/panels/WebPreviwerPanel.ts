@@ -58,6 +58,9 @@ export class WebPreviewerPanel implements vscode.Disposable {
     private readonly _onMessage = new vscode.EventEmitter<any>();
     /** Messages from the webview (toolbar commands, view changes, input). */
     public readonly onMessage = this._onMessage.event;
+    private readonly _onDidChangeVisibility = new vscode.EventEmitter<boolean>();
+    /** The tab was shown or hidden (another tab of its group became active). */
+    public readonly onDidChangeVisibility = this._onDidChangeVisibility.event;
 
     constructor(
         private readonly _extensionUri: vscode.Uri,
@@ -84,6 +87,17 @@ export class WebPreviewerPanel implements vscode.Disposable {
         };
         this._panel.webview.html = this.getHtml();
         this._panel.onDidDispose(() => this.dispose(), null, this._disposables);
+        let visible = this._panel.visible;
+        this._panel.onDidChangeViewState(
+            (e) => {
+                if (e.webviewPanel.visible !== visible) {
+                    visible = e.webviewPanel.visible;
+                    this._onDidChangeVisibility.fire(visible);
+                }
+            },
+            null,
+            this._disposables
+        );
         this._panel.webview.onDidReceiveMessage(
             (msg) => {
                 if (msg?.type === "ready") {
@@ -258,6 +272,7 @@ export class WebPreviewerPanel implements vscode.Disposable {
         }
         this._onDidDispose.dispose();
         this._onMessage.dispose();
+        this._onDidChangeVisibility.dispose();
     }
 
     private getHtml() {

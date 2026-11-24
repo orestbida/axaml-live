@@ -24,6 +24,7 @@ import {
 import { formFactors, resolveFormFactor } from "../xaml/formFactors";
 import { findElementByPath } from "../xaml/inspect";
 import { onLines } from "../util/lines";
+import { PreviewRequest, RequestLoop, mergePreviewRequests } from "./requestLoop";
 
 interface ViewInfo {
     zoom: number;
@@ -58,7 +59,6 @@ export class PreviewController implements vscode.Disposable {
     private _watchedDirs: string[] = [];
     private _restartTimer: NodeJS.Timeout | undefined;
     private _editTimer: NodeJS.Timeout | undefined;
-    private _generation = 0;
     private _lastXaml: XamlResult | undefined;
     private _xamlResults = 0;
     private readonly _crashGuard = new CrashGuard();
@@ -116,7 +116,7 @@ export class PreviewController implements vscode.Disposable {
             vscode.workspace.onDidChangeTextDocument((e) => {
                 if (this._file && samePath(e.document.uri.fsPath, this._file.fsPath) && e.contentChanges.length && !this.updateOnSave) {
                     clearTimeout(this._editTimer);
-                    this._editTimer = setTimeout(() => this.pushXaml(), this.editDelay);
+                    this._editTimer = setTimeout(() => this.contentChanged(), this.editDelay);
                 }
             }),
             vscode.workspace.onDidChangeConfiguration((e) => {
@@ -132,10 +132,10 @@ export class PreviewController implements vscode.Disposable {
                     e.affectsConfiguration("axamlLive.previewer.updateOn") ||
                     e.affectsConfiguration("axamlLive.previewer.background")
                 ) {
-                    this.pushXaml();
+                    this.contentChanged();
                 }
                 if (e.affectsConfiguration("axamlLive.previewer.fpsLimit")) {
-                    this._session?.setFpsLimit(this.fpsLimit);
+                    this._session?.setFpsLimit(this.frameRate);
                 }
                 if (e.affectsConfiguration("axamlLive.previewer.maxRenderScale")) {
                     this._panel?.setOptions(this.panelOptions);
@@ -143,7 +143,7 @@ export class PreviewController implements vscode.Disposable {
             }),
             vscode.workspace.onDidSaveTextDocument((doc) => {
                 if (this._file && samePath(doc.uri.fsPath, this._file.fsPath)) {
-                    this.pushXaml();
+                    this.contentChanged();
                 }
             })
         );
@@ -164,6 +164,14 @@ export class PreviewController implements vscode.Disposable {
 
     private get fpsLimit(): number {
         return Math.max(0, this.config.get<number>("fpsLimit", 60));
+    }
+
+    /**
+     * Frame rate for the designer: the FPS limit, or 2 while the preview tab is in the background, so an animation
+     * nobody sees does not keep rendering (updates still arrive and still paint).
+     */
+    private get frameRate(): number {
+        return this._panel && !this._panel.visible ? hiddenFrameRate : this.fpsLimit;
     }
 
     private get panelOptions(): PanelOptions {
@@ -188,6 +196,7 @@ export class PreviewController implements vscode.Disposable {
             this._panel = new WebPreviewerPanel(this._context.extensionUri, column, this.panelOptions);
             this._panel.onDidDispose(() => this.onPanelClosed());
             this._panel.onMessage((msg) => this.onPanelMessage(msg));
+            this._panel.onDidChangeVisibility(() => this._session?.setFpsLimit(this.frameRate));
         } else {
             this._panel.reveal();
         }
@@ -274,7 +283,7 @@ export class PreviewController implements vscode.Disposable {
                 this._stalls++;
                 logger.info(`The designer painted nothing for ${path.basename(file.fsPath)}; restarting it.`);
                 this._panel?.setState({ status: "starting", message: "The designer stopped painting · restarting…" });
-                void this.startSession(session.project, false);
+                void this.request({ restart: true, noBuild: true });
             } else {
                 this._panel?.setState({
                     status: "ready",
@@ -288,7 +297,7 @@ export class PreviewController implements vscode.Disposable {
     private optionsChanged() {
         this._panel?.setOptions(this.panelOptions);
         clearTimeout(this._optionsTimer);
-        this._optionsTimer = setTimeout(() => this.pushXaml(), 50);
+        this._optionsTimer = setTimeout(() => this.contentChanged(), 50);
     }
 
     /**
@@ -301,7 +310,7 @@ export class PreviewController implements vscode.Disposable {
         this._watchdog = setTimeout(() => {
             if (this._frames === framesAtPush && this._lastXaml === resultAtPush && this._session?.state === "ready" && retry) {
                 logger.debug("No frame after XAML update, sending it again.");
-                this.pushXaml(false);
+                void this.request({ force: true, noRetry: true });
             }
         }, 4000);
     }
@@ -374,33 +383,139 @@ export class PreviewController implements vscode.Disposable {
     }
 
     /** Switches the previewed file; starts a new previewer only when the host project changes. */
-    private async setFile(uri: vscode.Uri) {
+    private setFile(uri: vscode.Uri): Promise<void> {
         if (!this._file || !samePath(this._file.fsPath, uri.fsPath)) {
             this._crashGuard.reset();
+            this._autoBuiltFor = undefined;
         }
         this._file = uri;
         this._panel?.setTitle(uri);
-
-        const target = await this.resolveTarget(uri);
-        if (!target) {
-            return;
-        }
-        if (!fs.existsSync(target.file.targetPath) && this.autoBuild && !this._building) {
-            // the file's own assembly (e.g. a plugin library the host doesn't reference) was never built
-            this.stopSession();
-            await this.build(target.project);
-            return;
-        }
-        const session = this._session;
-        if (session && session.state !== "exited" && isSameProject(session.project, target.project)) {
-            this._panel?.setState({ ...this._panel.state, message: `${target.project.name} · ${path.basename(uri.fsPath)}` });
-            this.pushXaml(true, true);
-            return;
-        }
-        await this.startSession(target.project);
+        return this.request({});
     }
 
+    /**
+     * Everything that changes what the preview should show (file, edits, options, builds, crashes) only records a
+     * request here. One loop then brings the previewer to the current state, one run at a time: requests that arrive
+     * while it runs are merged into the next run, and each run reads the state as it is then. So no two operations
+     * interleave, and an older request can never act on a file or project that is no longer current.
+     */
+    private request(r: PreviewRequest): Promise<void> {
+        return this._loop.request(r);
+    }
+
+    private readonly _loop = new RequestLoop<PreviewRequest>(mergePreviewRequests, (r) => this.runRequest(r));
+    /** A build replaced the output the previewer runs: the next run starts a new one. */
+    private _outputChanged = false;
+    /** The file that belongs to no project, with the solution model that said so. */
+    private _unresolved: { path: string; model: sm.Solution | undefined } | undefined;
+    /** The parsed model behind the last "no target" answer of resolveTarget (undefined: the parse itself failed). */
+    private _answeredBy: sm.Solution | undefined;
+    /** Builds run (debug state). */
+    private _builds = 0;
+    /** The file an automatic build already ran for. */
+    private _autoBuiltFor: string | undefined;
+    /** The file the running previewer shows and its host project (reused while the file stays the same). */
+    private _target: { path: string; file: sm.File; project: sm.Project } | undefined;
+
+    private async runRequest(r: PreviewRequest) {
+        let built: boolean | undefined;
+        try {
+            built = await this.reconcile(r);
+        } catch (e) {
+            logger.error(`Preview update failed: ${e}`);
+        } finally {
+            r.build?.done.forEach((d) => d(!!built));
+        }
+    }
+
+    /** One run: makes the previewer show the current file. Returns whether a requested build succeeded. */
+    private async reconcile(r: PreviewRequest): Promise<boolean | undefined> {
+        const file = this._file;
+        if (!file || !this._panel) {
+            return r.build ? this.buildNow(r.build.project) : undefined;
+        }
+        if (r.reparse) {
+            await sln.buildSolutionModel().catch((e) => logger.error(`${e}`));
+        }
+
+        // an explicit build runs first, so nothing below (another file chosen meanwhile, a file outside the projects)
+        // can skip it; the previewer restarts on the new output in this run or the next
+        let built: boolean | undefined;
+        if (r.build) {
+            this._autoBuiltFor = file.fsPath;
+            built = await this.buildNow(r.build.project);
+            if (!built) {
+                return false;
+            }
+            this._outputChanged = true;
+        }
+
+        // a file that belongs to no project stays so until the solution model changes: no parse on every edit
+        const unresolved = this._unresolved;
+        if (!r.restart && unresolved && samePath(unresolved.path, file.fsPath) && unresolved.model === sln.getSolutionModel()) {
+            return built;
+        }
+        const session = this._session;
+        const alive = !!session && session.state !== "exited";
+        let target =
+            !r.reparse && !r.restart && !this._outputChanged && alive && this._target && samePath(this._target.path, file.fsPath)
+                ? this._target
+                : await this.resolveTarget(file);
+        // a newer file was chosen meanwhile: the next run (already requested) handles it
+        if (this._file !== file) {
+            return built;
+        }
+        if (!target) {
+            this._unresolved = this._answeredBy && { path: file.fsPath, model: this._answeredBy };
+            return built;
+        }
+        this._unresolved = undefined;
+
+        let restart = !!r.restart || this._outputChanged || !alive || !isSameProject(session!.project, target.project);
+        // automatic builds: once per file (opening it, or the Restart command), never again on each edit when a build
+        // did not help
+        const autoBuild =
+            !built &&
+            !r.noBuild &&
+            this.autoBuild &&
+            this._autoBuiltFor !== file.fsPath &&
+            // the file's own assembly (e.g. a plugin library the host doesn't reference) was never built, or the host
+            // is not ready to preview (no build output, no designer host yet)
+            (!fs.existsSync(target.file.targetPath) || (restart && !!canStartPreviewer(target.project)));
+        if (autoBuild) {
+            this._autoBuiltFor = file.fsPath;
+            if (!fs.existsSync(target.file.targetPath)) {
+                this.stopSession();
+            }
+            if (!(await this.buildNow(target.project)) || this._file !== file) {
+                return built;
+            }
+            restart = true;
+            target = await this.resolveTarget(file); // the build's re-parse knows the output and designer host
+            if (!target || this._file !== file) {
+                return built;
+            }
+        }
+
+        if (restart) {
+            if (!(await this.startSession(target.project)) || this._file !== file) {
+                return built;
+            }
+        } else if (!this._target || !samePath(this._target.path, file.fsPath)) {
+            this._panel?.setState({ ...this._panel.state, message: `${target.project.name} · ${path.basename(file.fsPath)}` });
+        }
+        this._target = { path: file.fsPath, file: target.file, project: target.project };
+        await this.pushXaml(!!r.force, !r.noRetry);
+        return built;
+    }
+
+    /**
+     * The file's project and the executable that hosts it. When the answer comes from a parsed model ("not in any
+     * project", "no host"), that model is remembered in _answeredBy, so the answer is kept until the model changes; a
+     * failed parse is not an answer and is tried again on the next run.
+     */
     private async resolveTarget(uri: vscode.Uri): Promise<{ file: sm.File; project: sm.Project } | undefined> {
+        this._answeredBy = undefined;
         let model: sm.Solution | undefined;
         try {
             model = await sln.ensureSolutionModel();
@@ -414,32 +529,34 @@ export class PreviewController implements vscode.Disposable {
             model = await sln.buildSolutionModel().catch(() => undefined);
             file = model && sln.getFileDetails(uri.fsPath, model);
         }
-        if (!model || !file) {
+        if (!model) {
+            this.showError("Failed to analyze the solution.");
+            return;
+        }
+        if (!file) {
+            this._answeredBy = model;
             this.showError(`${path.basename(uri.fsPath)} is not part of any project in the workspace.`);
             return;
         }
         const project = sln.getExecutableProject(model, file);
         if (!project) {
+            this._answeredBy = model;
             this.showError("No executable project (OutputType WinExe/Exe) found that hosts this file.");
             return;
         }
         return { file, project };
     }
 
-    /** (Re)starts the previewer for the project, building it first when needed. */
-    private async startSession(project: sm.Project, allowBuild = true): Promise<void> {
-        const generation = ++this._generation;
+    /** Starts a new previewer for the project (only called by reconcile). False when it could not start. */
+    private async startSession(project: sm.Project): Promise<boolean> {
+        this._outputChanged = false;
         this.stopSession();
         clearTimeout(this._restartTimer);
 
         const problem = canStartPreviewer(project);
-        if (problem && allowBuild && this.autoBuild) {
-            await this.build(project); // restarts the session on success, shows the error otherwise
-            return;
-        }
         if (problem) {
             this._panel?.setState({ status: "error", message: problem, canBuild: true });
-            return;
+            return false;
         }
 
         this._restarts++;
@@ -447,7 +564,7 @@ export class PreviewController implements vscode.Disposable {
         this._panel?.setXaml({});
         this._diagnostics.clear();
         this._panel?.setState({ status: "starting", message: `Starting previewer for ${project.name}…` });
-        const session = new PreviewSession(project, this.fpsLimit, this._view?.renderScale ?? 1);
+        const session = new PreviewSession(project, this.frameRate, this._view?.renderScale ?? 1);
         this._session = session;
         this.watchOutput(project);
 
@@ -470,7 +587,7 @@ export class PreviewController implements vscode.Disposable {
                     this._crashes++;
                     this._lastCrash = reason;
                     this._panel?.setState({ status: "starting", message: `${reason} · restarting…` });
-                    setTimeout(() => this._session === session && void this.startSession(project, false), 500);
+                    setTimeout(() => this._session === session && void this.request({ restart: true, noBuild: true }), 500);
                 } else {
                     this.showError(reason, session.recentOutput);
                 }
@@ -482,15 +599,11 @@ export class PreviewController implements vscode.Disposable {
         try {
             await session.start();
         } catch (e) {
-            if (generation === this._generation) {
+            if (this._session === session) {
                 this.showError("Failed to start the previewer.", `${e}`);
             }
-            return;
+            return false;
         }
-        if (generation !== this._generation) {
-            return;
-        }
-        this.pushXaml();
 
         // the previewer must report the designer session in a reasonable time
         setTimeout(() => {
@@ -498,6 +611,7 @@ export class PreviewController implements vscode.Disposable {
                 this.showError("Previewer did not respond.", session.recentOutput);
             }
         }, 60000);
+        return this._session === session;
     }
 
     private get autoBuild(): boolean {
@@ -507,6 +621,7 @@ export class PreviewController implements vscode.Disposable {
     private stopSession() {
         this._session?.dispose();
         this._session = undefined;
+        this._target = undefined;
         this._designDataContextFailed.clear();
         this._retryingWithoutDesignData = false;
         this.disposeWatchers();
@@ -518,25 +633,29 @@ export class PreviewController implements vscode.Disposable {
             return this.show(undefined);
         }
         this._panel?.setState({ status: "starting", message: "Restarting previewer…" });
-        await sln.buildSolutionModel().catch((e) => logger.error(`${e}`));
-        this.stopSession();
-        await this.setFile(this._file);
+        this._crashGuard.reset();
+        this._autoBuiltFor = undefined;
+        await this.request({ reparse: true, restart: true });
     }
 
-    private async pushXaml(retryIfStuck = true, skipIfUnchanged = false) {
+    /** The current file's XAML has to be sent again (edit, save, option change). */
+    private contentChanged() {
+        // an edit after the designer crashed repeatedly tries once more
+        if (this._session?.state === "exited") {
+            this._crashGuard.reset();
+        }
+        void this.request({});
+    }
+
+    /**
+     * Sends the current file's XAML, with the previewer options applied. Skipped when the session already shows exactly
+     * this text (switching back to a tab, saving without changes): each update opens a new design window.
+     */
+    private async pushXaml(force: boolean, retryIfStuck: boolean) {
         const file = this._file;
         const session = this._session;
-        if (!file || !session) {
-            return;
-        }
-        if (session.state === "exited") {
-            // stopped after crashing: an edit or option change tries again
-            this._crashGuard.reset();
-            void this.startSession(session.project, false);
-            return;
-        }
-        const details = sln.getFileDetails(file.fsPath);
-        if (!details) {
+        const details = this._target?.file;
+        if (!file || !session || !details) {
             return;
         }
         const doc = this.updateOnSave ? undefined : vscode.workspace.textDocuments.find((d) => samePath(d.uri.fsPath, file.fsPath));
@@ -560,7 +679,7 @@ export class PreviewController implements vscode.Disposable {
             text = applyDesignSize(text, size.width, size.height);
         }
         const last = this._lastPushed;
-        if (skipIfUnchanged && last && last.session === session && samePath(last.file, file.fsPath) && last.text === text) {
+        if (!force && last && last.session === session && samePath(last.file, file.fsPath) && last.text === text) {
             return;
         }
         this._lastPushed = { session, file: file.fsPath, text };
@@ -582,7 +701,7 @@ export class PreviewController implements vscode.Disposable {
             logger.info(`Preview without automatic design data context for ${path.basename(file.fsPath)}: ${error.split("\n")[0]}`);
             this._designDataContextFailed.set(file.fsPath, designDataHint(error));
             this._retryingWithoutDesignData = true;
-            this.pushXaml();
+            void this.request({});
             return;
         }
         if (file && this._retryingWithoutDesignData) {
@@ -623,7 +742,15 @@ export class PreviewController implements vscode.Disposable {
      * Builds the executable project and restarts the previewer.
      * Thanks to the shadow copy the running previewer doesn't block the build.
      */
-    public async build(project?: sm.Project): Promise<boolean> {
+    public build(project?: sm.Project): Promise<boolean> {
+        if (this._panel && this._file) {
+            // with a preview open the build is a step of the update loop: the previewer restarts on the new output
+            return new Promise((resolve) => void this.request({ build: { project, done: [resolve] } }));
+        }
+        return this.buildNow(project);
+    }
+
+    private async buildNow(project?: sm.Project): Promise<boolean> {
         if (this._building) {
             return this._building;
         }
@@ -642,6 +769,7 @@ export class PreviewController implements vscode.Disposable {
     }
 
     private async runBuild(project: sm.Project): Promise<boolean> {
+        this._builds++;
         this._panel?.setState({ status: "building", message: `Building ${project.name}…` });
         clearTimeout(this._restartTimer);
 
@@ -705,9 +833,7 @@ export class PreviewController implements vscode.Disposable {
                     await vscode.workspace
                         .getConfiguration("axamlLive.build")
                         .update("useInstalledSdk", true, vscode.ConfigurationTarget.Workspace);
-                    if (await this.build(project)) {
-                        this._file && this.setFile(this._file);
-                    }
+                    void this.build(project);
                 } else if (r === download) {
                     vscode.env.openExternal(vscode.Uri.parse(sdk.downloadUrl));
                 } else if (r === open && sdk.globalJson) {
@@ -728,12 +854,7 @@ export class PreviewController implements vscode.Disposable {
             this.showError("Failed to analyze the solution.", `${e}`);
             return undefined;
         });
-        if (this._panel && this._file && model) {
-            const file = sln.getFileDetails(this._file.fsPath, model);
-            const exe = sln.getExecutableProject(model, file) ?? project;
-            await this.startSession(exe, false);
-        }
-        return true;
+        return !!model;
     }
 
     /** Watches the build output so an external `dotnet build` refreshes the preview (#152, #179). */
@@ -759,17 +880,12 @@ export class PreviewController implements vscode.Disposable {
             return;
         }
         clearTimeout(this._restartTimer);
-        this._restartTimer = setTimeout(async () => {
+        this._restartTimer = setTimeout(() => {
             if (this._building || !this._panel || !this._file) {
                 return;
             }
             logger.info("Build output changed, restarting previewer.");
-            const model = await sln.buildSolutionModel().catch(() => undefined);
-            const file = model && sln.getFileDetails(this._file.fsPath, model);
-            const exe = model && sln.getExecutableProject(model, file);
-            if (exe) {
-                await this.startSession(exe, false);
-            }
+            void this.request({ reparse: true, restart: true, noBuild: true });
         }, 1500);
     }
 
@@ -868,6 +984,8 @@ export class PreviewController implements vscode.Disposable {
             lastCrash: this._lastCrash,
             xamlResults: this._xamlResults,
             building: !!this._building,
+            builds: this._builds,
+            solutionParses: sln.parseCount(),
             preview: {
                 frames: this._frames,
                 frame: this._frameInfo && {
@@ -888,6 +1006,7 @@ export class PreviewController implements vscode.Disposable {
     }
 
     public dispose() {
+        this._loop.stop();
         clearTimeout(this._restartTimer);
         clearTimeout(this._editTimer);
         clearTimeout(this._optionsTimer);
@@ -898,6 +1017,9 @@ export class PreviewController implements vscode.Disposable {
         this._disposables.forEach((d) => d.dispose());
     }
 }
+
+/** Frames per second while the preview tab is hidden. */
+const hiddenFrameRate = 2;
 
 export interface BuildResult {
     ok: boolean;

@@ -17,16 +17,19 @@ export async function createLanguageService(context: vscode.ExtensionContext): P
         },
     };
 
+    const watchers = [
+        vscode.workspace.createFileSystemWatcher("**/*.axaml"),
+        vscode.workspace.createFileSystemWatcher("**/*.{cs,csproj,props}"),
+    ];
+    context.subscriptions.push(...watchers);
+
     const clientOptions: lsp.LanguageClientOptions = {
         documentSelector: [{ language: avaloniaLanguageId }],
         progressOnInitialization: true,
         outputChannel: logger,
         synchronize: {
             // C# and project changes keep the server's in-memory compilation current (generated members without a build)
-            fileEvents: [
-                vscode.workspace.createFileSystemWatcher("**/*.axaml"),
-                vscode.workspace.createFileSystemWatcher("**/*.{cs,csproj,props}"),
-            ],
+            fileEvents: watchers,
         },
         middleware: {
             // attribute quote style (axamlLive.editor.attributeQuoteStyle) for completions that write `Prop=""`

@@ -330,6 +330,13 @@
     const pos = (e) => ({ x: e.offsetX / zoom, y: e.offsetY / zoom });
     const button = (e) => (e.button === 0 ? 1 : e.button === 2 ? 2 : e.button === 1 ? 3 : 0);
     let pendingMove = null;
+    // a move waiting for the next animation frame goes out before a press or release, never after it
+    const flushMove = () => {
+        if (pendingMove) {
+            send(pendingMove);
+            pendingMove = null;
+        }
+    };
     canvas.addEventListener("pointermove", (e) => {
         if (!forwarding()) {
             return;
@@ -337,10 +344,7 @@
         const first = !pendingMove;
         pendingMove = { type: "input", kind: "pointerMoved", ...pos(e), modifiers: modifiers(e), select: selectMode };
         if (first) {
-            requestAnimationFrame(() => {
-                send(pendingMove);
-                pendingMove = null;
-            });
+            requestAnimationFrame(flushMove);
         }
     });
     canvas.addEventListener("pointerdown", (e) => {
@@ -349,12 +353,14 @@
         }
         canvas.focus();
         canvas.setPointerCapture(e.pointerId);
+        flushMove();
         send({ type: "input", kind: "pointerPressed", ...pos(e), button: button(e), modifiers: modifiers(e), select: selectMode });
     });
     canvas.addEventListener("pointerup", (e) => {
         if (!forwarding()) {
             return;
         }
+        flushMove();
         send({ type: "input", kind: "pointerReleased", ...pos(e), button: button(e), modifiers: modifiers(e), select: selectMode });
     });
     canvas.addEventListener("pointerleave", () => {

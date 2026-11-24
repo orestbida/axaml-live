@@ -32,18 +32,30 @@ export function getSolutionModel(): sln.Solution | undefined {
     return _model;
 }
 
+let _queued: Promise<sln.Solution | undefined> | undefined;
+
 /**
- * Parses the solution (or project folder) with the SolutionParser tool.
- * Concurrent calls share the same run.
+ * Parses the solution (or project folder) with the SolutionParser tool. A call while a parse runs asks for what
+ * changed after that parse started (e.g. a build just wrote the designer host): it gets one more parse after it,
+ * shared by all calls that arrive meanwhile.
  */
 export function buildSolutionModel(): Promise<sln.Solution | undefined> {
-    _parsing ??= parseSolution().finally(() => (_parsing = undefined));
-    return _parsing;
+    if (!_parsing) {
+        _parsing = parseSolution().finally(() => (_parsing = undefined));
+        return _parsing;
+    }
+    _queued ??= _parsing
+        .catch(() => undefined)
+        .then(() => {
+            _queued = undefined;
+            return buildSolutionModel();
+        });
+    return _queued;
 }
 
-/** Returns the model, parsing it first if it doesn't exist yet. */
+/** Returns the model, parsing it first if it doesn't exist yet (joining a parse that is running). */
 export async function ensureSolutionModel(): Promise<sln.Solution | undefined> {
-    return _model ?? (await buildSolutionModel());
+    return _model ?? (await (_parsing ?? buildSolutionModel()));
 }
 
 /**
@@ -91,7 +103,15 @@ async function pickSolution(files: vscode.Uri[]): Promise<string | undefined> {
     return result;
 }
 
+let _parses = 0;
+
+/** How many times the solution was parsed (debug state). */
+export function parseCount(): number {
+    return _parses;
+}
+
 async function parseSolution(): Promise<sln.Solution | undefined> {
+    _parses++;
     const solutionPath = await getSolutionFile();
     if (!solutionPath) {
         logger.warn("No workspace folder; nothing to parse.");
@@ -129,7 +149,10 @@ async function parseSolution(): Promise<sln.Solution | undefined> {
 
     const dataFile = getSolutionDataFile();
     await fs.ensureDir(path.dirname(dataFile));
-    await fs.writeFile(dataFile, JSON.stringify(model, null, 2), "utf-8");
+    // written next to it and renamed: the language server must never read a half-written file
+    const tmp = `${dataFile}.${process.pid}.tmp`;
+    await fs.writeFile(tmp, JSON.stringify(model, null, 2), "utf-8");
+    await fs.move(tmp, dataFile, { overwrite: true });
 
     logger.info(`Solution parsed: ${model.projects.length} project(s), ${model.files.length} XAML file(s)`);
     return model;

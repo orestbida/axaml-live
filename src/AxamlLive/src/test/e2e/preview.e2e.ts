@@ -1,6 +1,7 @@
 import * as assert from "assert";
 import * as path from "path";
 import * as fs from "fs";
+import * as os from "os";
 import * as vscode from "vscode";
 import { execFile } from "child_process";
 import { e2eSetting, windowsScreenshot } from "./config";
@@ -31,6 +32,8 @@ type State = {
     sessionsStarted: number;
     lastXaml?: { error?: string; message?: string; line?: number };
     building: boolean;
+    builds?: number;
+    solutionParses?: number;
     preview?: {
         frames: number;
         frame?: { width: number; height: number; scale: number; logicalWidth: number; logicalHeight: number; avgLum: number };
@@ -703,6 +706,39 @@ suite("Avalonia previewer (e2e)", () => {
         await vscode.commands.executeCommand("axamlLive.createPreviewerAssets");
         await waitFor("previewer restarted after Build command", (s) => s.sessionsStarted > started && s.sessionState === "ready", 180000);
         await checkpoint("after-build-command");
+    });
+
+    test("a build still runs when another file is chosen right after it was asked for", async () => {
+        const before = await state();
+        const build = vscode.commands.executeCommand("axamlLive.createPreviewerAssets");
+        await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(findAxaml("App.axaml")), vscode.ViewColumn.One);
+        await build;
+        const s = await waitFor("build done", (s) => !s.building && (s.builds ?? 0) > (before.builds ?? 0), 180000);
+        assert.strictEqual(s.builds, (before.builds ?? 0) + 1);
+        editor = await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(mainWindow), vscode.ViewColumn.One);
+        await waitFor("ready on MainWindow", (s) => s.sessionState === "ready" && samePathLike(s.file ?? "", mainWindow), 120000);
+    });
+
+    test("editing a file that belongs to no project does not parse the solution again on every edit", async () => {
+        // outside every project folder (a file under a project folder counts as part of that project)
+        const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "axaml-e2e-")), "E2eLoose.axaml");
+        fs.writeFileSync(file, `<UserControl xmlns="https://github.com/avaloniaui"><TextBlock Text="loose" /></UserControl>`);
+        try {
+            const doc = await vscode.workspace.openTextDocument(file);
+            const ed = await vscode.window.showTextDocument(doc, vscode.ViewColumn.One);
+            await waitFor("not part of any project", (s) => /not part of any project/.test(s.panelState?.message ?? ""), 60000);
+            const parses = (await state()).solutionParses ?? 0;
+            for (let i = 0; i < 3; i++) {
+                await ed.edit((e) => e.insert(doc.positionAt(doc.getText().indexOf("loose")), "x"));
+                await sleep(1200); // longer than the edit delay: each edit is its own update
+            }
+            assert.strictEqual((await state()).solutionParses ?? 0, parses, "an edit must not start a solution parse");
+        } finally {
+            await vscode.commands.executeCommand("workbench.action.revertAndCloseActiveEditor");
+            fs.rmSync(file, { force: true });
+            editor = await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(mainWindow), vscode.ViewColumn.One);
+            await waitFor("ready on MainWindow", (s) => s.sessionState === "ready" && samePathLike(s.file ?? "", mainWindow), 120000);
+        }
     });
 
     async function completionLabels(prefix: string): Promise<string[]> {
