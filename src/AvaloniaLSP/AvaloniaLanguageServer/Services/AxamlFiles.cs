@@ -12,6 +12,9 @@ public static class AxamlFiles {
 
     const int MaxFiles = 500;
     static readonly ConcurrentDictionary<string, (DateTime Stamp, string Text)> Cache = new(StringComparer.OrdinalIgnoreCase);
+    static readonly ConcurrentDictionary<string, (DateTime Time, IReadOnlyList<string> Paths)> ListCache = new(StringComparer.OrdinalIgnoreCase);
+    static readonly TimeSpan ListLifetime = TimeSpan.FromSeconds(5);
+    static readonly HashSet<string> SkippedFolders = new(StringComparer.OrdinalIgnoreCase) { "bin", "obj", "node_modules", "packages" };
 
     public static IEnumerable<File> All(string? root, BufferService buffers, DocumentUri? except = null) {
         if (root == null || !Directory.Exists(root)) {
@@ -19,17 +22,7 @@ public static class AxamlFiles {
         }
 
         var exceptPath = except is null ? null : Path.GetFullPath(Utils.FromUri(except));
-        List<string> paths;
-        try {
-            var sep = Path.DirectorySeparatorChar;
-            paths = Directory.EnumerateFiles(root, "*.axaml", SearchOption.AllDirectories)
-                .Where(f => !f.Contains($"{sep}bin{sep}") && !f.Contains($"{sep}obj{sep}") && !f.Contains($"{sep}node_modules{sep}"))
-                .Take(MaxFiles).ToList();
-        } catch (Exception) {
-            yield break;
-        }
-
-        foreach (var path in paths) {
+        foreach (var path in Paths(root)) {
             var uri = DocumentUri.FromFileSystemPath(path);
             if ((except is not null && uri.Equals(except)) || string.Equals(Path.GetFullPath(path), exceptPath, StringComparison.OrdinalIgnoreCase)) {
                 continue;
@@ -40,6 +33,37 @@ public static class AxamlFiles {
                 yield return new File(path, System.IO.Path.GetFileName(path), text);
             }
         }
+    }
+
+    /// <summary>
+    /// The .axaml files under the root, without build output and tool folders (they are never entered). The list is
+    /// reused for a few seconds: completion asks for it on many keystrokes.
+    /// </summary>
+    static IReadOnlyList<string> Paths(string root) {
+        if (ListCache.TryGetValue(root, out var cached) && DateTime.UtcNow - cached.Time < ListLifetime) {
+            return cached.Paths;
+        }
+
+        var paths = new List<string>();
+        var pending = new Stack<string>();
+        pending.Push(root);
+        while (pending.Count > 0 && paths.Count < MaxFiles) {
+            var dir = pending.Pop();
+            try {
+                paths.AddRange(Directory.EnumerateFiles(dir, "*.axaml").Take(MaxFiles - paths.Count));
+                foreach (var sub in Directory.EnumerateDirectories(dir)) {
+                    var name = System.IO.Path.GetFileName(sub);
+                    if (!SkippedFolders.Contains(name) && !name.StartsWith('.')) {
+                        pending.Push(sub);
+                    }
+                }
+            } catch (Exception) {
+                // no access, or removed meanwhile: skipped
+            }
+        }
+
+        ListCache[root] = (DateTime.UtcNow, paths);
+        return paths;
     }
 
     static string? Read(string path) {

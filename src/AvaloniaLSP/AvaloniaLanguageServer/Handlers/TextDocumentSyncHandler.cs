@@ -1,37 +1,22 @@
 using AvaloniaLanguageServer.Models;
 using AvaloniaLanguageServer.Services;
 using MediatR;
-using Microsoft.Extensions.Configuration;
-using OmniSharp.Extensions.LanguageServer.Protocol.Server;
 using OmniSharp.Extensions.LanguageServer.Protocol.Server.Capabilities;
 
 namespace AvaloniaLanguageServer.Handlers;
 
 public class TextDocumentSyncHandler : TextDocumentSyncHandlerBase {
     private readonly ILogger<TextDocumentSyncHandler> _logger;
-    private readonly ILanguageServerConfiguration _configuration;
     private readonly TextDocumentSelector _documentSelector;
     private readonly Workspace _workspace;
-    private readonly Func<ILanguageServer?> _getServer;
-    private readonly AvaloniaLanguageServer.Services.DiagnosticsService _diagnostics;
+    private readonly DiagnosticsService _diagnostics;
 
-
-    public override async Task<Unit> Handle(DidOpenTextDocumentParams request, CancellationToken cancellationToken) {
+    public override Task<Unit> Handle(DidOpenTextDocumentParams request, CancellationToken cancellationToken) {
         var uri = request.TextDocument.Uri;
-
-        var conf = await _configuration.GetScopedConfiguration(uri, cancellationToken);
-        var options = new ServerOptions();
-
-        conf.GetSection("Avalonia").Bind(options);
-
-        string text = request.TextDocument.Text;
-        await _workspace.InitializeAsync(uri, _getServer()?.Client.ClientSettings.RootPath);
-        _workspace.BufferService.Add(uri, text);
+        _workspace.BufferService.Add(uri, request.TextDocument.Text);
         _diagnostics.Schedule(uri, 0);
-
-        _logger.LogInformation("** DidOpenText: {Uri}", uri);
-
-        return Unit.Value;
+        _logger.LogInformation("Opened {Uri}", uri);
+        return Unit.Task;
     }
 
     public override Task<Unit> Handle(DidChangeTextDocumentParams request, CancellationToken cancellationToken) {
@@ -44,28 +29,17 @@ public class TextDocumentSyncHandler : TextDocumentSyncHandlerBase {
             }
         }
         _diagnostics.Schedule(uri);
-
-        return Task.FromResult(Unit.Value);
-    }
-
-    public override Task<Unit> Handle(DidSaveTextDocumentParams request, CancellationToken cancellationToken) {
-        _logger.LogInformation("DidSaveTextDocumentParams {Request}", request);
         return Unit.Task;
     }
 
+    public override Task<Unit> Handle(DidSaveTextDocumentParams request, CancellationToken cancellationToken) => Unit.Task;
+
     public override Task<Unit> Handle(DidCloseTextDocumentParams request, CancellationToken cancellationToken) {
-
-        if (_configuration.TryGetScopedConfiguration(request.TextDocument.Uri, out var disposable)) {
-            disposable.Dispose();
-        }
-
         var uri = request.TextDocument.Uri;
         _workspace.BufferService.Remove(uri);
         _diagnostics.Clear(uri);
-
-        _logger.LogInformation("** Did Close Doc: {Uri}", uri);
-
-        return Task.FromResult(Unit.Value);
+        _logger.LogInformation("Closed {Uri}", uri);
+        return Unit.Task;
     }
 
     protected override TextDocumentSyncRegistrationOptions CreateRegistrationOptions(TextSynchronizationCapability capability,
@@ -83,20 +57,12 @@ public class TextDocumentSyncHandler : TextDocumentSyncHandlerBase {
 
     public TextDocumentSyncHandler(
         ILogger<TextDocumentSyncHandler> logger,
-        ILanguageServerConfiguration configuration,
         TextDocumentSelector documentSelector,
         Workspace workspace,
-        Func<ILanguageServer?> getServer,
         DiagnosticsService diagnostics) {
         _diagnostics = diagnostics;
         _logger = logger;
-        _configuration = configuration;
         _documentSelector = documentSelector;
         _workspace = workspace;
-        _getServer = getServer;
-    }
-
-    public class ServerOptions {
-        public bool CompletionWord { get; set; }
     }
 }

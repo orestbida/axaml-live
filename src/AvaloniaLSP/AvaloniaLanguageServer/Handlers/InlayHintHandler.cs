@@ -25,12 +25,9 @@ public sealed class InlayHintHandler : InlayHintsHandlerBase {
             return null;
         }
 
-        if (_workspace.ProjectInfo == null || !_workspace.IsCurrentProject(request.TextDocument.Uri)) {
-            await _workspace.InitializeAsync(request.TextDocument.Uri, _getServer()?.Client.ClientSettings.RootPath);
-        }
-
-        var compilation = await _workspace.GetCompilationAsync();
-        var analyzer = new XamlAnalyzer(new XamlDocument(text), _workspace.CompletionMetadata, compilation);
+        var ctx = await _workspace.ContextAsync(request.TextDocument.Uri, _getServer()?.Client.ClientSettings.RootPath);
+        var compilation = ctx.Compilation;
+        var analyzer = new XamlAnalyzer(new XamlDocument(text), ctx.Metadata, compilation);
         var hints = analyzer.BindingTypeHints()
             .Where(h => h.Position.Line >= request.Range.Start.Line && h.Position.Line <= request.Range.End.Line)
             .Select(h => new InlayHint {

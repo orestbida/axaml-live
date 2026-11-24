@@ -2,17 +2,10 @@ namespace AvaloniaLanguageServer.Services;
 
 public sealed class Buffer {
 
-    public string? GetTextTillLine(Position position) {
-        string[] lines = _text.Split(separator, StringSplitOptions.None);
-        string text = string.Join("\n", lines[..position.Line]);
-        string line = lines[position.Line][..position.Character];
-        // no leading newline for the first line, offsets must map back to positions
-        return position.Line == 0 ? line : $"{text}\n{line}";
-    }
-
-    public string? GetLine(Position position) {
-        string[] lines = _text.Split(separator, StringSplitOptions.None);
-        return lines[position.Line];
+    /// <summary>The text before the position, lines joined with "\n" (offsets must map back to positions).</summary>
+    public string GetTextTillLine(Position position) {
+        var end = BufferService.OffsetOf(_text, position);
+        return _text[..end].Replace("\r\n", "\n");
     }
 
     public string GetText() => _text;
@@ -22,5 +15,4 @@ public sealed class Buffer {
     }
 
     readonly string _text;
-    private static readonly string[] separator = ["\n", "\r\n"];
 }

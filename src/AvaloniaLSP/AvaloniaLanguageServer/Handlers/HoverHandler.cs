@@ -27,12 +27,9 @@ public sealed class HoverHandler : HoverHandlerBase {
             return null;
         }
 
-        if (_workspace.ProjectInfo == null || !_workspace.IsCurrentProject(request.TextDocument.Uri)) {
-            await _workspace.InitializeAsync(request.TextDocument.Uri, _getServer()?.Client.ClientSettings.RootPath);
-        }
-
-        var compilation = await _workspace.GetCompilationAsync();
-        var analyzer = new XamlAnalyzer(new XamlDocument(text), _workspace.CompletionMetadata, compilation);
+        var ctx = await _workspace.ContextAsync(request.TextDocument.Uri, _getServer()?.Client.ClientSettings.RootPath);
+        var compilation = ctx.Compilation;
+        var analyzer = new XamlAnalyzer(new XamlDocument(text), ctx.Metadata, compilation);
         var symbol = analyzer.SymbolAt(request.Position);
         if (symbol == null) {
             return null;
@@ -76,7 +73,7 @@ public sealed class HoverHandler : HoverHandlerBase {
             return Code(here.Source, "xml") + "\n\nResource in this file";
         }
 
-        var root = _getServer()?.Client.ClientSettings.RootPath ?? _workspace.ProjectInfo?.ProjectDirectory;
+        var root = _getServer()?.Client.ClientSettings.RootPath ?? _workspace.LastProject?.ProjectDirectory;
         foreach (var file in AxamlFiles.All(root, _workspace.BufferService, uri)) {
             var d = ResourceKeys.In(file.Text).FirstOrDefault(d => d.Key == key);
             if (d != null) {

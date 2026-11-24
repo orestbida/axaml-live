@@ -9,6 +9,7 @@ public sealed class DiagnosticsService {
     readonly Workspace _workspace;
     readonly Func<ILanguageServer?> _getServer;
     readonly ConcurrentDictionary<DocumentUri, CancellationTokenSource> _pending = new();
+    readonly object _gate = new();
 
     public DiagnosticsService(Workspace workspace, Func<ILanguageServer?> getServer) {
         _workspace = workspace;
@@ -22,27 +23,35 @@ public sealed class DiagnosticsService {
 
     public void Schedule(DocumentUri uri, int delayMs = 300) {
         var cts = new CancellationTokenSource();
-        if (_pending.TryGetValue(uri, out var previous)) {
-            previous.Cancel();
+        lock (_gate) {
+            if (_pending.TryGetValue(uri, out var previous)) {
+                previous.Cancel();
+            }
+            _pending[uri] = cts;
         }
 
-        _pending[uri] = cts;
         _ = Task.Delay(delayMs, cts.Token).ContinueWith(async t => {
-            if (t.IsCanceled) {
-                return;
-            }
-
             try {
-                await PublishAsync(uri, cts.Token);
+                if (!t.IsCanceled) {
+                    await PublishAsync(uri, cts.Token);
+                }
             } catch (Exception e) when (e is not OperationCanceledException) {
                 Log.Logger.Warning(e, "Diagnostics failed for {Uri}", uri);
+            } finally {
+                // the run that owns the token disposes it; a newer run has replaced (and cancelled) it under the same lock
+                lock (_gate) {
+                    _pending.TryRemove(new KeyValuePair<DocumentUri, CancellationTokenSource>(uri, cts));
+                    cts.Dispose();
+                }
             }
-        }, TaskScheduler.Default);
+        }, TaskScheduler.Default).Unwrap();
     }
 
     public void Clear(DocumentUri uri) {
-        if (_pending.TryRemove(uri, out var cts)) {
-            cts.Cancel();
+        lock (_gate) {
+            if (_pending.TryRemove(uri, out var cts)) {
+                cts.Cancel();
+            }
         }
 
         _getServer()?.TextDocument.PublishDiagnostics(new PublishDiagnosticsParams { Uri = uri, Diagnostics = new Container<Diagnostic>() });
@@ -54,16 +63,18 @@ public sealed class DiagnosticsService {
             return;
         }
 
-        if (_workspace.ProjectInfo == null || !_workspace.IsCurrentProject(uri)) {
-            await _workspace.InitializeAsync(uri, _getServer()?.Client.ClientSettings.RootPath);
-        }
-
-        var compilation = await _workspace.GetCompilationAsync();
+        var ctx = await _workspace.ContextAsync(uri, _getServer()?.Client.ClientSettings.RootPath);
         ct.ThrowIfCancellationRequested();
-        var diagnostics = new XamlAnalyzer(new XamlDocument(text), _workspace.CompletionMetadata, compilation).Analyze();
-        _getServer()?.TextDocument.PublishDiagnostics(new PublishDiagnosticsParams {
-            Uri = uri,
-            Diagnostics = new Container<Diagnostic>(diagnostics),
-        });
+        var diagnostics = new XamlAnalyzer(new XamlDocument(text), ctx.Metadata, ctx.Compilation).Analyze();
+        // checked again under the lock: a newer run (newer text) may have started while this one was analyzing
+        lock (_gate) {
+            if (ct.IsCancellationRequested) {
+                return;
+            }
+            _getServer()?.TextDocument.PublishDiagnostics(new PublishDiagnosticsParams {
+                Uri = uri,
+                Diagnostics = new Container<Diagnostic>(diagnostics),
+            });
+        }
     }
 }

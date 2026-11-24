@@ -32,13 +32,10 @@ public sealed class DefinitionHandler : DefinitionHandlerBase {
             return new LocationOrLocationLinks();
         }
 
-        if (_workspace.ProjectInfo == null || !_workspace.IsCurrentProject(uri)) {
-            await _workspace.InitializeAsync(uri, _getServer()?.Client.ClientSettings.RootPath);
-        }
-
-        var compilation = await _workspace.GetCompilationAsync();
+        var ctx = await _workspace.ContextAsync(uri, _getServer()?.Client.ClientSettings.RootPath);
+        var compilation = ctx.Compilation;
         var doc = new XamlDocument(text);
-        var analyzer = new XamlAnalyzer(doc, _workspace.CompletionMetadata, compilation);
+        var analyzer = new XamlAnalyzer(doc, ctx.Metadata, compilation);
         var symbol = analyzer.SymbolAt(request.Position);
 
         IEnumerable<Location> locations = symbol switch {
@@ -57,7 +54,7 @@ public sealed class DefinitionHandler : DefinitionHandlerBase {
 
     /// <summary>Where a resource key is defined in the workspace's other .axaml files (App.axaml, dictionaries).</summary>
     IEnumerable<Location> ResourceInOtherFiles(string key, DocumentUri current) {
-        var root = _getServer()?.Client.ClientSettings.RootPath ?? _workspace.ProjectInfo?.ProjectDirectory;
+        var root = _getServer()?.Client.ClientSettings.RootPath ?? _workspace.LastProject?.ProjectDirectory;
         foreach (var file in AxamlFiles.All(root, _workspace.BufferService, current)) {
             foreach (var d in ResourceKeys.In(file.Text).Where(d => d.Key == key)) {
                 var doc = new XamlDocument(file.Text);

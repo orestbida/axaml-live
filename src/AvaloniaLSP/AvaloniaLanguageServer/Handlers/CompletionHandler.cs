@@ -28,7 +28,8 @@ public class CompletionHandler : CompletionHandlerBase {
             return new CompletionList();
         }
 
-        var metadata = await InitializeCompletionEngineAsync(request.TextDocument.Uri);
+        var ctx = await _workspace.ContextAsync(request.TextDocument.Uri, _getServer()?.Client.ClientSettings.RootPath, compile: false);
+        var metadata = ctx.Metadata;
         var fullText = _workspace.BufferService.GetText(request.TextDocument.Uri) ?? text;
         var fullDoc = new XamlDocument(fullText);
         // "text" joins lines with "\n"; offsets into the document (CRLF files) come from the position
@@ -42,7 +43,7 @@ public class CompletionHandler : CompletionHandlerBase {
 
         var bindingPath = BindingPath.Match(text.Length > 2000 ? text[^2000..] : text);
         if (bindingPath.Success) {
-            var compilation = await _workspace.GetCompilationAsync();
+            var compilation = ctx.Project == null ? null : await _workspace.Roslyn.GetCompilationAsync(ctx.Project.ProjectPath);
             var prefix = bindingPath.Groups["path"].Value;
             var members = new XamlAnalyzer(fullDoc, metadata, compilation).BindingMembersAt(cursor, prefix);
             if (members != null) {
@@ -109,17 +110,6 @@ public class CompletionHandler : CompletionHandlerBase {
         };
     }
 
-    async Task<Metadata?> InitializeCompletionEngineAsync(DocumentUri uri) {
-        // the workspace is shared by all documents: re-target when the document is from another project
-        if (_workspace.ProjectInfo == null || !_workspace.IsCurrentProject(uri)) {
-            await _workspace.InitializeAsync(uri, _getServer()?.Client.ClientSettings.RootPath);
-        } else {
-            _workspace.RefreshMetadataIfNeeded();
-        }
-
-        return _workspace.CompletionMetadata;
-    }
-
     public CompletionHandler(Workspace workspace, TextDocumentSelector documentSelector, Func<ILanguageServer?> getServer) {
         _workspace = workspace;
         _documentSelector = documentSelector;
@@ -142,7 +132,7 @@ public class CompletionHandler : CompletionHandlerBase {
         }), isIncomplete: false);
     }
 
-    string? RootPath => _getServer()?.Client.ClientSettings.RootPath ?? _workspace.ProjectInfo?.ProjectDirectory;
+    string? RootPath => _getServer()?.Client.ClientSettings.RootPath ?? _workspace.LastProject?.ProjectDirectory;
 
     static Position OffsetToPosition(string text, int offset) {
         offset = Math.Clamp(offset, 0, text.Length);

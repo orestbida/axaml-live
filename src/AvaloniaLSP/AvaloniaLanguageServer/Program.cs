@@ -18,11 +18,12 @@ public class Program {
         options
             .WithInput(Console.OpenStandardInput())
             .WithOutput(Console.OpenStandardOutput())
-            .ConfigureLogging(p => p
-                .AddSerilog(Log.Logger)
-                .AddLanguageProtocolLogging()
-                .SetMinimumLevel(LogLevel.Trace)
-            )
+            .ConfigureLogging(p => {
+                p.AddSerilog(Log.Logger).SetMinimumLevel(Verbose ? LogLevel.Trace : LogLevel.Information);
+                if (Verbose) {
+                    p.AddLanguageProtocolLogging();
+                }
+            })
             .WithHandler<CompletionHandler>()
             .WithHandler<TextDocumentSyncHandler>()
             .WithHandler<HoverHandler>()
@@ -41,6 +42,8 @@ public class Program {
     static void ConfigureServices(IServiceCollection services) {
         services.AddSingleton(new ConfigurationItem { Section = "Avalonia Server" });
         services.AddSingleton(new TextDocumentSelector(
+            // by language: .xaml files of Avalonia projects are switched to AXAML by the extension
+            new TextDocumentFilter { Language = "AXAML" },
             new TextDocumentFilter { Pattern = "**/*.axaml" }
         ));
         services.AddSingleton<Workspace>();
@@ -50,12 +53,15 @@ public class Program {
 
     static ILanguageServer? GetServer() => server;
 
+    /// <summary>AXAML_LIVE_LSP_VERBOSE=1 logs everything, including the protocol messages (document text).</summary>
+    static readonly bool Verbose = Environment.GetEnvironmentVariable("AXAML_LIVE_LSP_VERBOSE") == "1";
+
     static void InitializeLogging() {
         string logFilePath = Path.Combine(Path.GetTempPath(), "axaml-live.log");
         Log.Logger = new LoggerConfiguration()
-            .WriteTo.File(logFilePath, shared: true)
+            .WriteTo.File(logFilePath, shared: true, rollOnFileSizeLimit: true, fileSizeLimitBytes: 10 * 1024 * 1024, retainedFileCountLimit: 2)
             .Enrich.FromLogContext()
-            .MinimumLevel.Verbose()
+            .MinimumLevel.Is(Verbose ? Serilog.Events.LogEventLevel.Verbose : Serilog.Events.LogEventLevel.Information)
             .CreateLogger();
     }
 }

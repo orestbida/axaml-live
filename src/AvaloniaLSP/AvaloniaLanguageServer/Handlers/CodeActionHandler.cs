@@ -1,5 +1,6 @@
 using AvaloniaLanguageServer.Models;
 using AvaloniaLanguageServer.Services;
+using OmniSharp.Extensions.LanguageServer.Protocol.Server;
 using Range = OmniSharp.Extensions.LanguageServer.Protocol.Models.Range;
 
 namespace AvaloniaLanguageServer.Handlers;
@@ -8,10 +9,12 @@ namespace AvaloniaLanguageServer.Handlers;
 public sealed class CodeActionHandler : CodeActionHandlerBase {
     readonly Workspace _workspace;
     readonly TextDocumentSelector _documentSelector;
+    readonly Func<ILanguageServer?> _getServer;
 
-    public CodeActionHandler(Workspace workspace, TextDocumentSelector documentSelector) {
+    public CodeActionHandler(Workspace workspace, TextDocumentSelector documentSelector, Func<ILanguageServer?> getServer) {
         _workspace = workspace;
         _documentSelector = documentSelector;
+        _getServer = getServer;
     }
 
     protected override CodeActionRegistrationOptions CreateRegistrationOptions(CodeActionCapability capability, ClientCapabilities clientCapabilities) =>
@@ -74,8 +77,9 @@ public sealed class CodeActionHandler : CodeActionHandlerBase {
         }
 
         var prefix = dataType.Value[..colon];
-        var compilation = await _workspace.GetCompilationAsync();
-        var symbol = new XamlAnalyzer(doc, _workspace.CompletionMetadata, compilation).SymbolAt(dataType.ValueRange.Start);
+        var ctx = await _workspace.ContextAsync(uri, _getServer()?.Client.ClientSettings.RootPath);
+        var compilation = ctx.Compilation;
+        var symbol = new XamlAnalyzer(doc, ctx.Metadata, compilation).SymbolAt(dataType.ValueRange.Start);
         var type = symbol is TypeReferenceSymbol t ? compilation?.GetTypeByMetadataName(t.FullName) : null;
         if (type == null || type.IsAbstract || type.IsSealed || type.IsStatic || type.IsGenericType || type.ContainingType != null) {
             return null;

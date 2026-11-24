@@ -153,7 +153,9 @@ public sealed class RoslynProjects : IDisposable {
 
         var solution = project.Solution;
         var hash = Convert.ToHexString(SHA1.HashData(Encoding.UTF8.GetBytes(projectPath.ToLowerInvariant())))[..12];
-        var dir = Path.Combine(Path.GetTempPath(), "avalonia-lsp", hash, _version.ToString());
+        var projectDir = Path.Combine(Path.GetTempPath(), "avalonia-lsp", hash);
+        var dir = Path.Combine(projectDir, _version.ToString());
+        RemoveOtherVersions(projectDir, dir);
         Directory.CreateDirectory(dir);
 
         var outputs = new List<string>();
@@ -200,6 +202,25 @@ public sealed class RoslynProjects : IDisposable {
             .Concat(outputs.Where(o => o != main))
             .Concat(references.Distinct(StringComparer.OrdinalIgnoreCase).Where(File.Exists))
             .ToArray();
+    }
+
+    /// <summary>Earlier emits of the project. One still in use (or another server's) cannot be deleted and is tried next time.</summary>
+    static void RemoveOtherVersions(string projectDir, string keep) {
+        if (!Directory.Exists(projectDir)) {
+            return;
+        }
+
+        foreach (var old in Directory.EnumerateDirectories(projectDir)) {
+            if (string.Equals(old, keep, StringComparison.OrdinalIgnoreCase)) {
+                continue;
+            }
+
+            try {
+                Directory.Delete(old, recursive: true);
+            } catch (Exception) {
+                // in use
+            }
+        }
     }
 
     public void Dispose() => _workspace?.Dispose();

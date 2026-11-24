@@ -1,164 +1,194 @@
-
+using System.Collections.Concurrent;
 using System.Text.Json;
 using Avalonia.Ide.CompletionEngine;
 using Avalonia.Ide.CompletionEngine.AssemblyMetadata;
 using Avalonia.Ide.CompletionEngine.DnlibMetadataProvider;
 using AvaloniaLanguageServer.Services;
 using AvaloniaLanguageServer.Utilities;
-
+using Compilation = Microsoft.CodeAnalysis.Compilation;
 
 namespace AvaloniaLanguageServer.Models;
 
+/// <summary>What a request needs for one document: its project, completion metadata and C# compilation.</summary>
+public sealed record DocumentContext(ProjectInfo? Project, Metadata? Metadata, Compilation? Compilation);
+
+/// <summary>
+/// Projects of the open AXAML documents. Metadata is kept per project, so documents from several projects can be open
+/// at the same time: a request for one document never changes what another request sees.
+/// </summary>
 public class Workspace {
-    public ProjectInfo? ProjectInfo { get; private set; }
     public BufferService BufferService { get; } = new();
     public RoslynProjects Roslyn { get; } = new();
 
-    /// <summary>Raised when completion metadata changed (build or live compilation): diagnostics are recomputed.</summary>
+    /// <summary>Raised when completion metadata of a project changed (build or live compilation): diagnostics are recomputed.</summary>
     public event Action? MetadataChanged;
 
-    Metadata? _builtMetadata;
-    Metadata? _liveMetadata;
-    int _liveVersion = -1;
-    DateTime _liveTime;
-    string? _liveProject;
+    /// <summary>The project of the last document a request was made for, used as a fallback root folder.</summary>
+    public ProjectInfo? LastProject { get; private set; }
+
+    sealed record Built(DateTime Stamp, Metadata Metadata);
+    sealed record Live(int Version, DateTime Time, Metadata Metadata);
+
+    readonly ConcurrentDictionary<string, ProjectInfo> _projects = new(StringComparer.OrdinalIgnoreCase);
+    readonly ConcurrentDictionary<string, Built> _built = new(StringComparer.OrdinalIgnoreCase);
+    readonly ConcurrentDictionary<string, Live> _live = new(StringComparer.OrdinalIgnoreCase);
+    readonly ConcurrentDictionary<string, int> _liveAttempted = new(StringComparer.OrdinalIgnoreCase);
     readonly SemaphoreSlim _liveLock = new(1, 1);
+    readonly object _dataLock = new();
+    readonly object _builtLock = new();
+    readonly MetadataReader _metadataReader = new(new DnlibMetadataProvider());
+
+    string? _dataFile;
+    DateTime _dataStamp;
+    SolutionData? _data;
 
     public Workspace() {
-        Roslyn.Changed += () => RefreshLiveAsync().FireAndForget();
+        Roslyn.Changed += () => {
+            foreach (var project in _liveAttempted.Keys) {
+                RefreshLiveAsync(project).FireAndForget();
+            }
+        };
+    }
+
+    /// <param name="compile">false when the request may not need the C# compilation (it can take seconds the first time)</param>
+    public async Task<DocumentContext> ContextAsync(DocumentUri uri, string? rootPath, bool compile = true) {
+        var project = await ProjectOfAsync(uri);
+        if (project == null) {
+            return new DocumentContext(null, null, null);
+        }
+
+        LastProject = project;
+        var built = BuiltMetadata(project, rootPath);
+        if (!_liveAttempted.TryGetValue(project.ProjectPath, out var attempted) || attempted != Roslyn.Version) {
+            RefreshLiveAsync(project.ProjectPath).FireAndForget();
+        }
+
+        Metadata? metadata = built?.Metadata;
+        if (_live.TryGetValue(project.ProjectPath, out var live) && (built == null || live.Time > built.Stamp)) {
+            // whichever is newer: the build (complete, includes XAML-generated code) or the live compilation of sources
+            metadata = live.Metadata;
+        }
+
+        var compilation = compile ? await Roslyn.GetCompilationAsync(project.ProjectPath) : null;
+        return new DocumentContext(project, metadata, compilation);
+    }
+
+    async Task<ProjectInfo?> ProjectOfAsync(DocumentUri uri) {
+        var directory = Path.GetDirectoryName(Utils.FromUri(uri));
+        if (directory == null) {
+            return null;
+        }
+
+        if (_projects.TryGetValue(directory, out var cached) && File.Exists(cached.ProjectPath)) {
+            return cached;
+        }
+
+        var project = await ProjectInfo.GetProjectInfoAsync(uri);
+        if (project != null) {
+            _projects[directory] = project;
+        }
+
+        return project;
     }
 
     /// <summary>
-    /// Metadata from an in-memory compilation of the current project (sources + generators, no build needed),
-    /// falling back to the built assembly.
+    /// Metadata from an in-memory compilation of the project (sources and generators, no build needed). Runs once per
+    /// change of the C# sources, also when the code does not compile, so a broken project is not compiled again and again.
     /// </summary>
-    public Metadata? CompletionMetadata {
-        get {
-            var live = _liveProject == ProjectInfo?.ProjectPath ? _liveMetadata : null;
-            if (live == null) {
-                return _builtMetadata;
-            }
-
-            if (_builtMetadata == null) {
-                return live;
-            }
-            // whichever is newer: the build (complete, includes XAML-generated code) or the live compilation of sources
-            return _metadataStamp > _liveTime ? _builtMetadata : live;
-        }
-    }
-
-    public Task<Microsoft.CodeAnalysis.Compilation?> GetCompilationAsync() =>
-        ProjectInfo == null ? Task.FromResult<Microsoft.CodeAnalysis.Compilation?>(null) : Roslyn.GetCompilationAsync(ProjectInfo.ProjectPath);
-
-    public async Task RefreshLiveAsync() {
-        var project = ProjectInfo?.ProjectPath;
-        if (project == null) {
-            return;
-        }
-
+    async Task RefreshLiveAsync(string project) {
+        bool changed = false;
         await _liveLock.WaitAsync();
         try {
-            if (project == _liveProject && Roslyn.Version == _liveVersion && _liveMetadata != null) {
+            var version = Roslyn.Version;
+            if (_liveAttempted.TryGetValue(project, out var attempted) && attempted == version) {
                 return;
             }
 
-            var version = Roslyn.Version;
+            _liveAttempted[project] = version;
             var paths = await Roslyn.EmitForMetadataAsync(project);
             if (paths == null) {
                 return;
             }
 
             var metadata = MetadataConverter.ConvertMetadata(new DnlibMetadataProvider().GetMetadata(paths));
-            _liveMetadata = metadata;
-            _liveProject = project;
-            _liveVersion = version;
-            _liveTime = DateTime.UtcNow;
+            _live[project] = new Live(version, DateTime.UtcNow, metadata);
+            changed = true;
             Log.Logger.Information("Live completion metadata for {Project} (version {Version})", project, version);
         } catch (Exception e) {
             Log.Logger.Warning(e, "Live metadata failed for {Project}", project);
-            return;
         } finally {
             _liveLock.Release();
         }
-        MetadataChanged?.Invoke();
-    }
 
-    string? _rootPath;
-    string? _metadataAssembly;
-    DateTime _metadataStamp;
-    string? _dataFile;
-    DateTime _dataStamp;
-    SolutionData? _data;
-
-    /// <summary>True when the document belongs to the project the current metadata was loaded for.</summary>
-    public bool IsCurrentProject(DocumentUri uri) {
-        if (ProjectInfo == null) {
-            return false;
-        }
-
-        var path = Utilities.Utils.FromUri(uri);
-        return path.StartsWith(ProjectInfo.ProjectDirectory + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
-    }
-
-    public async Task InitializeAsync(DocumentUri uri, string? RootPath) {
-        try {
-            _rootPath = RootPath;
-            var previous = ProjectInfo?.ProjectPath;
-            ProjectInfo = await ProjectInfo.GetProjectInfoAsync(uri);
-            RefreshMetadataIfNeeded();
-            if (ProjectInfo?.ProjectPath != previous || _liveMetadata == null) {
-                RefreshLiveAsync().FireAndForget();
-            }
-        } catch (Exception e) {
-            throw new Exception($"Failed to initialize workspace: {uri}", e);
+        if (changed) {
+            MetadataChanged?.Invoke();
         }
     }
 
     /// <summary>
-    /// Reloads completion metadata when the target assembly was rebuilt (#29, #179),
-    /// so new view model properties etc. show up without restarting VS Code.
+    /// Metadata of the built assembly, reloaded when it was rebuilt (#29, #179), so new view model properties etc. show
+    /// up without restarting VS Code.
     /// </summary>
-    public void RefreshMetadataIfNeeded(bool force = false) {
-        var assembly = GetTargetAssembly(_rootPath);
+    Built? BuiltMetadata(ProjectInfo project, string? rootPath) {
+        var assembly = TargetAssembly(project, rootPath);
         if (assembly == null || !File.Exists(assembly)) {
-            _builtMetadata = null;
-            _metadataAssembly = null;
-            return;
+            return null;
         }
 
         var stamp = File.GetLastWriteTimeUtc(assembly);
-        if (!force && _builtMetadata != null && assembly == _metadataAssembly && stamp == _metadataStamp) {
-            return;
+        var cached = _built.GetValueOrDefault(assembly);
+        if (cached != null && cached.Stamp == stamp) {
+            return cached;
         }
 
-        try {
-            _builtMetadata = _metadataReader.GetForTargetAssembly(assembly);
-            _metadataAssembly = assembly;
-            _metadataStamp = stamp;
-            Log.Logger.Information("Completion metadata loaded for {Assembly}", assembly);
-            MetadataChanged?.Invoke();
-        } catch (Exception e) {
-            // the assembly can be mid-write during a build; retry on next request
-            Log.Logger.Warning(e, "Failed to load completion metadata for {Assembly}", assembly);
+        Built? loaded = null;
+        // one load per build: requests that arrive meanwhile wait for it instead of loading (and reporting) it again
+        lock (_builtLock) {
+            cached = _built.GetValueOrDefault(assembly);
+            if (cached != null && cached.Stamp == stamp) {
+                return cached;
+            }
+
+            try {
+                var metadata = _metadataReader.GetForTargetAssembly(assembly);
+                if (metadata == null) {
+                    return cached;
+                }
+
+                loaded = new Built(stamp, metadata);
+                _built[assembly] = loaded;
+                Log.Logger.Information("Completion metadata loaded for {Assembly}", assembly);
+            } catch (Exception e) {
+                // the assembly can be mid-write during a build; retry on next request
+                Log.Logger.Warning(e, "Failed to load completion metadata for {Assembly}", assembly);
+                return cached;
+            }
         }
+
+        MetadataChanged?.Invoke();
+        return loaded;
     }
 
-    string? GetTargetAssembly(string? rootPath) {
-        var dataFile = GetSolutionDataFile(rootPath);
+    string? TargetAssembly(ProjectInfo project, string? rootPath) {
+        var dataFile = SolutionDataFile(rootPath);
         if (dataFile == null || !File.Exists(dataFile)) {
             return null;
         }
 
         try {
-            var stamp = File.GetLastWriteTimeUtc(dataFile);
-            if (dataFile != _dataFile || stamp != _dataStamp) {
-                _data = JsonSerializer.Deserialize<SolutionData>(File.ReadAllText(dataFile));
-                _dataFile = dataFile;
-                _dataStamp = stamp;
+            SolutionData? data;
+            lock (_dataLock) {
+                var stamp = File.GetLastWriteTimeUtc(dataFile);
+                if (dataFile != _dataFile || stamp != _dataStamp) {
+                    _data = JsonSerializer.Deserialize<SolutionData>(File.ReadAllText(dataFile));
+                    _dataFile = dataFile;
+                    _dataStamp = stamp;
+                }
+                data = _data;
             }
 
             // first candidate that has been built
-            return _data?.GetCompletionTargets(ProjectInfo?.ProjectPath)
+            return data?.GetCompletionTargets(project.ProjectPath)
                 .Select(p => p.TargetPath)
                 .FirstOrDefault(File.Exists);
         } catch (Exception e) {
@@ -167,7 +197,7 @@ public class Workspace {
         }
     }
 
-    static string? GetSolutionDataFile(string? rootPath) {
+    static string? SolutionDataFile(string? rootPath) {
         // provided by the VS Code extension, workspace specific
         var fromClient = Environment.GetEnvironmentVariable("AVALONIA_SOLUTION_DATA");
         if (!string.IsNullOrEmpty(fromClient)) {
@@ -190,6 +220,4 @@ public class Workspace {
             .Select(Path.GetFileName)
             .FirstOrDefault();
     }
-
-    readonly MetadataReader _metadataReader = new(new DnlibMetadataProvider());
 }

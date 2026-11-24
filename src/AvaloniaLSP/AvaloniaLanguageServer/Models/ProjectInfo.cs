@@ -45,25 +45,4 @@ public class ProjectInfo {
     /// Project directory path
     /// </summary>
     public string ProjectDirectory { get; }
-
-    public string AssemblyPath() {
-        string? path = string.Empty;
-
-        string debugPath = Path.Combine(ProjectDirectory, "bin", "Debug");
-        string assembly = Path.GetFileNameWithoutExtension(ProjectPath) + ".dll";
-
-        if (Directory.Exists(debugPath)) {
-            path = Directory.GetFiles(debugPath, assembly, SearchOption.AllDirectories).FirstOrDefault();
-        }
-
-        return path ?? string.Empty;
-    }
-
-    public bool IsAssemblyExist {
-        get {
-            string assemblyPath = AssemblyPath();
-            return !string.IsNullOrEmpty(assemblyPath) && File.Exists(assemblyPath);
-        }
-    }
-
 }
