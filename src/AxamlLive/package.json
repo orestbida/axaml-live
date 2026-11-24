@@ -3,7 +3,7 @@
   "displayName": "AXAML Live",
   "description": "Live preview, completion, diagnostics and formatting for Avalonia XAML (.axaml) files. Community project, not affiliated with AvaloniaUI.",
   "publisher": "OrestBida",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "license": "MIT",
   "qna": "false",
   "icon": "./media/icon.png",

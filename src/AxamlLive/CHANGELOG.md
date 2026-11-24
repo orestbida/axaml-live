@@ -2,6 +2,22 @@
 
 All notable changes to AXAML Live are documented in this file.
 
+## [0.2.1] - 24 November 2026
+
+- Fixed: with .axaml files of two projects open, the language server could keep recompiling both projects and check
+  files against the other project's types. Metadata is now kept per project.
+- Fixed: diagnostics of an older edit could replace newer ones.
+- Fixed: Avalonia .xaml files got no completion, hover or diagnostics from the language server.
+- Fixed: select mode could miss a hover or click when the designer output arrived in pieces, and the solution could
+  fail to load for paths with non-ASCII characters.
+- Fixed: closing or switching the preview while it was starting could leave a previewer connection and a temp folder
+  behind. Preview copies of another open VS Code window are no longer deleted.
+- The language server log is limited to 10 MB and no longer contains document text (set AXAML_LIVE_LSP_VERBOSE=1 for
+  the full log). Old compilation output in the temp folder is removed.
+- Faster style class and resource key completion in large workspaces (build output folders are skipped).
+- New Avalonia Project: cancelling no longer shows an error, and the project name is checked.
+- .axml files (Xamarin.Android layouts) are no longer opened as AXAML.
+
 ## [0.2.0] - 24 November 2026
 
 - Select mode in the preview toolbar: hover over a control to highlight it, click to select its element in the editor.
