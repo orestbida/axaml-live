@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import path = require("path");
 import { AppConstants } from "../util/Utilities";
-import { getNonce } from "../util/getNouce";
+import { getNonce } from "../util/nonce";
 import { formFactors } from "../xaml/formFactors";
 import * as zlib from "zlib";
 import * as fs from "fs";

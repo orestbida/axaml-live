@@ -3,7 +3,8 @@ import * as path from "path";
 import * as fs from "fs-extra";
 import { spawn } from "child_process";
 import { Command } from "../commandManager";
-import { logger } from "../util/Utilities";
+import { isUnder, logger } from "../util/Utilities";
+import { onLines } from "../util/lines";
 import {
     codeBehindCandidates,
     findTypeDeclarationLine,
@@ -145,7 +146,7 @@ export class RunProjectCommand implements Command {
         }
 
         const folder =
-            vscode.workspace.workspaceFolders?.find((f) => project.path.startsWith(f.uri.fsPath)) ?? vscode.workspace.workspaceFolders?.[0];
+            vscode.workspace.workspaceFolders?.find((f) => isUnder(project.path, f.uri.fsPath)) ?? vscode.workspace.workspaceFolders?.[0];
         if (!vscode.extensions.getExtension("ms-dotnettools.csharp")) {
             // no .NET debugger available: run in a terminal
             const terminal = vscode.window.createTerminal({ name: `Avalonia: ${project.name}`, cwd: path.dirname(project.path) });
@@ -187,9 +188,9 @@ export class InstallTemplatesCommand implements Command {
                     const proc = spawn("dotnet", ["new", "install", "Avalonia.Templates"], {
                         env: { ...process.env, DOTNET_CLI_UI_LANGUAGE: "en" },
                     });
-                    const log = (d: Buffer) => logger.appendLine(d.toString().trimEnd());
-                    proc.stdout.on("data", log);
-                    proc.stderr.on("data", log);
+                    const log = (line: string) => line.trim() && logger.appendLine(line);
+                    onLines(proc.stdout, log);
+                    onLines(proc.stderr, log);
                     proc.on("error", (e) => {
                         logger.error(`Failed to run dotnet: ${e.message}`);
                         resolve(false);

@@ -23,6 +23,7 @@ import {
 } from "../xaml/designTransforms";
 import { formFactors, resolveFormFactor } from "../xaml/formFactors";
 import { findElementByPath } from "../xaml/inspect";
+import { onLines } from "../util/lines";
 
 interface ViewInfo {
     zoom: number;
@@ -881,6 +882,7 @@ export class PreviewController implements vscode.Disposable {
         clearTimeout(this._editTimer);
         clearTimeout(this._optionsTimer);
         clearTimeout(this._watchdog);
+        clearTimeout(this._renderCheck);
         this.stopSession();
         this._panel?.dispose();
         this._disposables.forEach((d) => d.dispose());
@@ -907,20 +909,18 @@ export function dotnetBuild(projectPath: string, ignoreGlobalJson = false): Prom
             cwd: ignoreGlobalJson ? os.tmpdir() : path.dirname(projectPath),
             env: { ...process.env, DOTNET_CLI_UI_LANGUAGE: "en" },
         });
-        const onData = (d: Buffer) => {
-            for (const line of d.toString().split(/\r?\n/)) {
-                if (!line.trim()) {
-                    continue;
-                }
-                logger.appendLine(line);
-                lines.push(line);
-                if (/\berror\b/i.test(line)) {
-                    errors.add(line.trim());
-                }
+        const onLine = (line: string) => {
+            if (!line.trim()) {
+                return;
+            }
+            logger.appendLine(line);
+            lines.push(line);
+            if (/\berror\b/i.test(line)) {
+                errors.add(line.trim());
             }
         };
-        proc.stdout.on("data", onData);
-        proc.stderr.on("data", onData);
+        onLines(proc.stdout, onLine);
+        onLines(proc.stderr, onLine);
         proc.on("error", (e) => resolve({ ok: false, errors: `Failed to run dotnet: ${e.message}`, tail: "" }));
         proc.on("close", (code) =>
             resolve({

@@ -4,6 +4,7 @@ import * as fs from "fs-extra";
 import { spawn } from "child_process";
 import { Command } from "../commandManager";
 import { AppConstants, logger } from "../util/Utilities";
+import { onLines } from "../util/lines";
 
 const templates = [
     { label: "Window", key: "avalonia.window", description: "Window (.axaml + code-behind)" },
@@ -179,8 +180,8 @@ function runDotnet(args: string[], cwd: string): Promise<{ ok: boolean }> {
     return new Promise((resolve) => {
         logger.info(`dotnet ${args.join(" ")}`);
         const proc = spawn("dotnet", args, { cwd, env: process.env });
-        proc.stdout.on("data", (d) => logger.appendLine(d.toString().trim()));
-        proc.stderr.on("data", (d) => logger.appendLine(d.toString().trim()));
+        onLines(proc.stdout, (line) => line.trim() && logger.appendLine(line));
+        onLines(proc.stderr, (line) => line.trim() && logger.appendLine(line));
         proc.on("error", (e) => {
             logger.error(`Failed to run dotnet: ${e.message}`);
             resolve({ ok: false });

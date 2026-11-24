@@ -22,7 +22,6 @@ export async function createLanguageService(context: vscode.ExtensionContext): P
         progressOnInitialization: true,
         outputChannel: logger,
         synchronize: {
-            configurationSection: "axaml",
             // C# and project changes keep the server's in-memory compilation current (generated members without a build)
             fileEvents: [
                 vscode.workspace.createFileSystemWatcher("**/*.axaml"),

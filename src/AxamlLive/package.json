@@ -37,7 +37,7 @@
   "homepage": "https://github.com/orestbida/axaml-live#readme",
   "activationEvents": [
     "workspaceContains:**/*.axaml",
-    "onLanguage:axaml"
+    "onLanguage:AXAML"
   ],
   "main": "./dist/extension.js",
   "contributes": {
@@ -56,8 +56,7 @@
           "AXAML"
         ],
         "extensions": [
-          ".axaml",
-          ".axml"
+          ".axaml"
         ],
         "configuration": "./AXAML.language-configuration.json",
         "icon": {

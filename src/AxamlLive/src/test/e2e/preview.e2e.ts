@@ -733,6 +733,51 @@ suite("Avalonia previewer (e2e)", () => {
         assert.ok(labels.includes("Button"), "Button not offered by completion");
     });
 
+    test("a .xaml file switched to AXAML gets completion and hover", async () => {
+        const file = path.join(path.dirname(mainWindow), "E2eLegacy.xaml");
+        const text = `<UserControl xmlns="https://github.com/avaloniaui">\n  <TextBlock Text="x" />\n  \n</UserControl>`;
+        fs.writeFileSync(file, text);
+        try {
+            let doc = await vscode.workspace.openTextDocument(file);
+            // what the extension does for .xaml files the solution lists as AvaloniaXaml
+            doc = await vscode.languages.setTextDocumentLanguage(doc, "AXAML");
+            const ed = await vscode.window.showTextDocument(doc, vscode.ViewColumn.One);
+            let hoverText = "";
+            for (let i = 0; i < 20 && !hoverText.includes("Avalonia.Controls.TextBlock"); i++) {
+                const hovers = await vscode.commands.executeCommand<vscode.Hover[]>(
+                    "vscode.executeHoverProvider",
+                    doc.uri,
+                    doc.positionAt(text.indexOf("TextBlock") + 2)
+                );
+                hoverText = hovers.flatMap((h) => h.contents.map((c) => (typeof c === "string" ? c : c.value))).join("\n");
+                if (!hoverText.includes("Avalonia.Controls.TextBlock")) {
+                    await sleep(1000);
+                }
+            }
+            assert.ok(hoverText.includes("Avalonia.Controls.TextBlock"), `no AXAML hover in a .xaml file: ${hoverText}`);
+
+            const emptyLine = doc.positionAt(text.indexOf("  \n") + 2);
+            await ed.edit((e) => e.insert(emptyLine, "<Butt"));
+            const at = emptyLine.translate(0, "<Butt".length);
+            let labels: string[] = [];
+            for (let i = 0; i < 20 && !labels.includes("Button"); i++) {
+                const list = await vscode.commands.executeCommand<vscode.CompletionList>(
+                    "vscode.executeCompletionItemProvider",
+                    doc.uri,
+                    at
+                );
+                labels = list.items.map((it) => (typeof it.label === "string" ? it.label : it.label.label));
+                if (!labels.includes("Button")) {
+                    await sleep(1000);
+                }
+            }
+            assert.ok(labels.includes("Button"), `no AXAML completion in a .xaml file (${labels.slice(0, 10).join(", ")})`);
+        } finally {
+            await vscode.commands.executeCommand("workbench.action.revertAndCloseActiveEditor");
+            fs.rmSync(file, { force: true });
+        }
+    });
+
     /** Types `prefix`, applies the completion item `label` exactly like VS Code would and returns the line. */
     async function applyCompletion(prefix: string, label: string): Promise<string> {
         await showMain();

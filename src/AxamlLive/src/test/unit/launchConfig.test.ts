@@ -1,6 +1,6 @@
 import * as assert from "assert";
 import * as path from "path";
-import { projectFromLaunchConfigurations, stripJsonComments } from "../../services/launchConfig";
+import { projectFromLaunchConfigurations } from "../../services/launchConfig";
 
 const root = path.resolve("/work/app");
 const projects = [
@@ -39,10 +39,5 @@ suite("launch configuration -> previewer host", () => {
         ];
         assert.strictEqual(projectFromLaunchConfigurations(configs, projects, root)?.name, "App.Desktop");
         assert.strictEqual(projectFromLaunchConfigurations([{ type: "node" }], projects, root), undefined);
-    });
-
-    test("launch.json comments and trailing commas", () => {
-        const json = `{\n // comment\n "configurations": [ { "type": "coreclr", /* x */ "program": "a.dll", }, ],\n}`;
-        assert.deepStrictEqual(JSON.parse(stripJsonComments(json)).configurations[0].program, "a.dll");
     });
 });

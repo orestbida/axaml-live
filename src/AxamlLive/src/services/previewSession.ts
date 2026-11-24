@@ -13,6 +13,10 @@ import { AppConstants, logger, samePath } from "../util/Utilities";
 import { XamlResult, parseXamlError } from "./xamlError";
 import { summarizeCrash } from "./crashInfo";
 import { designTimeConfigProperties } from "./runtimeConfig";
+import { onLines } from "../util/lines";
+
+/** Lines the designer hook writes to stdout: the control under the mouse in select mode. */
+const inspectPrefix = "AXAML_LIVE ";
 
 export type SessionState = "starting" | "ready" | "exited";
 
@@ -133,7 +137,23 @@ export class PreviewSession implements vscode.Disposable {
         const p = this.project;
         const outputDir = path.dirname(p.targetPath);
 
+        // dispose() can run while this awaits (quick file switches, restarts after a build): what was created after it
+        // ran is cleaned up here
+        const abandoned = () => {
+            if (!this._disposed) {
+                return false;
+            }
+            this._server?.close();
+            if (this._shadowDir) {
+                removeShadowDir(this._shadowDir).catch(() => undefined);
+            }
+            return true;
+        };
+
         this._shadowDir = await this.createShadowCopy(outputDir);
+        if (abandoned()) {
+            return;
+        }
         const inShadow = (f: string) => (this._shadowDir ? path.join(this._shadowDir, path.basename(f)) : f);
         if (this._shadowDir) {
             await enableDesignTimeFeatures(inShadow(p.runtimeConfigFilePath));
@@ -144,6 +164,9 @@ export class PreviewSession implements vscode.Disposable {
             this._server!.once("error", reject);
             this._server!.listen(0, AppConstants.localhost, () => resolve());
         });
+        if (abandoned()) {
+            return;
+        }
         const bsonPort = (this._server.address() as net.AddressInfo).port;
 
         const args = [
@@ -160,39 +183,28 @@ export class PreviewSession implements vscode.Disposable {
             inShadow(p.targetPath),
         ];
 
-        if (this._disposed) {
-            return;
-        }
-
         logger.info(`Starting previewer for ${p.name}: dotnet ${args.join(" ")}`);
         const proc = spawn("dotnet", args, { env: designerHookEnv(), cwd: this._shadowDir ?? outputDir });
         this._process = proc;
 
-        const collect = (data: Buffer) => {
-            for (const line of data.toString().split(/\r?\n/)) {
-                if (line.startsWith("AXAML_LIVE ")) {
-                    try {
-                        const msg = JSON.parse(line.substring("AXAML_LIVE ".length)) as InspectMessage;
-                        if (msg.kind !== "hover") {
-                            logger.appendLine(`[previewer] ${line}`);
-                        }
-                        this._onInspect.fire(msg);
-                    } catch {
-                        logger.appendLine(`[previewer] unreadable: ${line}`);
-                    }
-                    continue;
-                }
-                if (line.trim()) {
-                    this._log.push(line);
-                    logger.appendLine(`[previewer] ${line}`);
-                }
+        const collect = (line: string) => {
+            // app output written without a newline can come first on the same line
+            const inspect = line.indexOf(inspectPrefix + "{");
+            if (inspect >= 0) {
+                collect(line.substring(0, inspect));
+                this.onInspectLine(line.substring(inspect + inspectPrefix.length));
+                return;
             }
-            if (this._log.length > 200) {
-                this._log.splice(0, this._log.length - 200);
+            if (line.trim()) {
+                this._log.push(line);
+                logger.appendLine(`[previewer] ${line}`);
+                if (this._log.length > 200) {
+                    this._log.splice(0, this._log.length - 200);
+                }
             }
         };
-        proc.stdout?.on("data", collect);
-        proc.stderr?.on("data", collect);
+        onLines(proc.stdout, collect);
+        onLines(proc.stderr, collect);
         proc.on("error", (e) => {
             this.exitReason = `Failed to start 'dotnet': ${e.message}`;
             this.setState("exited");
@@ -205,6 +217,18 @@ export class PreviewSession implements vscode.Disposable {
                 this.setState("exited");
             }
         });
+    }
+
+    private onInspectLine(json: string) {
+        try {
+            const msg = JSON.parse(json) as InspectMessage;
+            if (msg.kind !== "hover") {
+                logger.appendLine(`[previewer] ${inspectPrefix}${json}`);
+            }
+            this._onInspect.fire(msg);
+        } catch {
+            logger.appendLine(`[previewer] unreadable: ${json}`);
+        }
     }
 
     public updateXaml(file: sm.File, text: string) {
@@ -445,6 +469,7 @@ export class PreviewSession implements vscode.Disposable {
         const dir = path.join(root, `${Date.now()}`);
         try {
             await fs.ensureDir(dir);
+            await fs.writeFile(path.join(dir, ownerFile), `${process.pid}`);
             for (const entry of await fs.readdir(outputDir, { withFileTypes: true })) {
                 const src = path.join(outputDir, entry.name);
                 const dst = path.join(dir, entry.name);
@@ -595,13 +620,33 @@ async function removeShadowDir(dir: string) {
     await fs.remove(dir);
 }
 
-/** Deletes stale shadow copies (from crashed or previous VS Code sessions). Locked ones are skipped. */
+/** Holds the process id of the extension host that created a shadow copy. */
+const ownerFile = ".axaml-live-owner";
+
+/**
+ * Deletes stale shadow copies (from crashed or previous VS Code sessions). Copies of another VS Code window that is
+ * still running are kept: on Linux and macOS files in use can be deleted. Locked ones are skipped.
+ */
 async function cleanupShadowCopies(root: string) {
     if (!(await fs.pathExists(root))) {
         return;
     }
     for (const name of await fs.readdir(root)) {
-        await removeShadowDir(path.join(root, name)).catch(() => undefined);
+        const dir = path.join(root, name);
+        const owner = Number(await fs.readFile(path.join(dir, ownerFile), "utf8").catch(() => ""));
+        if (owner && owner !== process.pid && isRunning(owner)) {
+            continue;
+        }
+        await removeShadowDir(dir).catch(() => undefined);
+    }
+}
+
+function isRunning(pid: number): boolean {
+    try {
+        process.kill(pid, 0);
+        return true;
+    } catch (e) {
+        return (e as NodeJS.ErrnoException).code === "EPERM";
     }
 }
 

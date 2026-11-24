@@ -58,39 +58,3 @@ export function projectFromLaunchConfigurations<T extends HostCandidate>(
     }
     return undefined;
 }
-
-/** launch.json allows comments and trailing commas. */
-export function stripJsonComments(json: string): string {
-    let out = "";
-    let inString = false;
-    for (let i = 0; i < json.length; i++) {
-        const ch = json[i];
-        if (inString) {
-            out += ch;
-            if (ch === "\\") {
-                out += json[++i] ?? "";
-            } else if (ch === '"') {
-                inString = false;
-            }
-            continue;
-        }
-        if (ch === '"') {
-            inString = true;
-            out += ch;
-        } else if (ch === "/" && json[i + 1] === "/") {
-            while (i < json.length && json[i] !== "\n") {
-                i++;
-            }
-            out += "\n";
-        } else if (ch === "/" && json[i + 1] === "*") {
-            i = json.indexOf("*/", i + 2);
-            if (i < 0) {
-                break;
-            }
-            i++;
-        } else {
-            out += ch;
-        }
-    }
-    return out.replace(/,(\s*[}\]])/g, "$1");
-}

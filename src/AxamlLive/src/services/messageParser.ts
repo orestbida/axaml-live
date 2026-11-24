@@ -157,10 +157,6 @@ export interface IncomingMessage {
 }
 
 /**
- * Accumulates TCP chunks and yields complete messages.
- * TCP is a stream: one `data` event may contain a partial message or several messages.
- */
-/**
  * Splits the designer's TCP stream into messages. Frames are megabytes and arrive in small chunks: chunks are kept
  * in a list and joined once per message (joining on every chunk is quadratic and halves the frame rate).
  */

@@ -8,6 +8,7 @@ import * as sln from "../models/solutionModel";
 import { AppConstants, logger, samePath, isUnder } from "../util/Utilities";
 import { getDotnetRuntimePath } from "../runtimeManager";
 import { projectFromLaunchConfigurations } from "./launchConfig";
+import { collectText } from "../util/lines";
 
 let _context: vscode.ExtensionContext;
 let _model: sln.Solution | undefined;
@@ -101,15 +102,16 @@ async function parseSolution(): Promise<sln.Solution | undefined> {
     const dotnet = await getDotnetRuntimePath();
 
     const json = await new Promise<string>((resolve, reject) => {
-        let stdout = "";
-        let stderr = "";
         // no shell: arguments with spaces are passed safely (#41, #43)
         const parser = spawn(dotnet, [parserLocation, solutionPath], { env: process.env });
         logger.info(`Parsing solution: ${solutionPath}`);
-        parser.stdout.on("data", (d) => (stdout += d.toString()));
-        parser.stderr.on("data", (d) => (stderr += d.toString()));
+        // decoded once at the end: a non-ASCII path (e.g. a Cyrillic user name) can be cut between chunks
+        const out = collectText(parser.stdout);
+        const err = collectText(parser.stderr);
         parser.on("error", (e) => reject(e));
         parser.on("close", (code) => {
+            const stdout = out();
+            const stderr = err();
             if (stderr.trim()) {
                 code === 0 ? logger.info(stderr.trim()) : logger.warn(stderr.trim());
             }
